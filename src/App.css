@@ -110,12 +110,6 @@
   padding: 1rem;
 }
 
-.consolidated-balance-card {
-  background:
-    radial-gradient(circle at 88% 12%, rgba(255, 255, 255, 0.2), transparent 38%),
-    linear-gradient(145deg, #0f766e 0%, #0d9588 50%, #0ca79d 100%);
-}
-
 .balance-head {
   display: flex;
   align-items: center;
@@ -139,22 +133,6 @@
   margin: 0.34rem 0 0;
   font-size: 0.88rem;
   color: #ecfffd;
-}
-
-.consolidated-breakdown {
-  margin-top: 0.38rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.42rem;
-}
-
-.consolidated-breakdown small {
-  border-radius: 999px;
-  padding: 0.16rem 0.52rem;
-  background: rgba(236, 255, 252, 0.17);
-  color: #e8fffc;
-  font-size: 0.72rem;
-  font-weight: 700;
 }
 
 .metrics-grid {
@@ -386,10 +364,6 @@
   gap: 0.45rem;
 }
 
-.evolution-list.consolidated {
-  gap: 0.56rem;
-}
-
 .evolution-item {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -413,18 +387,6 @@
   font-size: 0.8rem;
 }
 
-.consolidated-split {
-  margin-top: 0.34rem;
-  display: flex;
-  justify-content: space-between;
-  gap: 0.6rem;
-}
-
-.consolidated-split small {
-  font-size: 0.72rem;
-  color: var(--muted);
-}
-
 .summary-item {
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -443,51 +405,6 @@
   margin-top: 0.3rem;
   font-size: 1.02rem;
   letter-spacing: -0.01em;
-}
-
-.allocation-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 0.54rem;
-}
-
-.allocation-item {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 0.58rem;
-  background: #fff;
-}
-
-.allocation-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.allocation-head strong {
-  font-size: 0.84rem;
-}
-
-.allocation-head small,
-.allocation-item > small {
-  font-size: 0.73rem;
-  color: var(--muted);
-}
-
-.allocation-caixa {
-  background: linear-gradient(90deg, #0f766e, #14b8a6);
-}
-
-.allocation-renda_fixa {
-  background: linear-gradient(90deg, #0284c7, #0ea5e9);
-}
-
-.allocation-renda_variavel {
-  background: linear-gradient(90deg, #7c3aed, #8b5cf6);
 }
 
 .bar-list {

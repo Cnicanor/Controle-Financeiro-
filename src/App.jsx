@@ -43,14 +43,24 @@ const INVESTMENT_CASH_TYPE = 'Caixa'
 const DEFAULT_CASH_ASSET_ID = 'asset-caixa-principal'
 const BACKUP_VERSION = 1
 
-const STORAGE_ENTRIES_KEY = 'controle_financeiro_entries_v2'
-const LEGACY_STORAGE_ENTRIES_KEY = 'controle_financeiro_entries_v1'
-const STORAGE_GOALS_KEY = 'controle_financeiro_goals_v1'
-const STORAGE_RECURRING_RUN_KEY = 'controle_financeiro_recurring_last_month'
-const STORAGE_INVESTMENT_ASSETS_KEY = 'controle_financeiro_investment_assets_v1'
-const STORAGE_INVESTMENT_MOVEMENTS_KEY = 'controle_financeiro_investment_movements_v1'
-const STORAGE_INVESTMENT_JOURNAL_KEY = 'controle_financeiro_investment_journal_v1'
-const STORAGE_INSTALL_GUIDE_KEY = 'controle_financeiro_install_guide_v1'
+const STORAGE_KEYS = Object.freeze({
+  entries: 'controle_financeiro_entries_v2',
+  legacyEntries: 'controle_financeiro_entries_v1',
+  goals: 'controle_financeiro_goals_v1',
+  recurringRun: 'controle_financeiro_recurring_last_month',
+  investmentAssets: 'controle_financeiro_investment_assets_v1',
+  investmentMovements: 'controle_financeiro_investment_movements_v1',
+  investmentJournal: 'controle_financeiro_investment_journal_v1',
+  installGuide: 'controle_financeiro_install_guide_v1',
+})
+const STORAGE_ENTRIES_KEY = STORAGE_KEYS.entries
+const LEGACY_STORAGE_ENTRIES_KEY = STORAGE_KEYS.legacyEntries
+const STORAGE_GOALS_KEY = STORAGE_KEYS.goals
+const STORAGE_RECURRING_RUN_KEY = STORAGE_KEYS.recurringRun
+const STORAGE_INVESTMENT_ASSETS_KEY = STORAGE_KEYS.investmentAssets
+const STORAGE_INVESTMENT_MOVEMENTS_KEY = STORAGE_KEYS.investmentMovements
+const STORAGE_INVESTMENT_JOURNAL_KEY = STORAGE_KEYS.investmentJournal
+const STORAGE_INSTALL_GUIDE_KEY = STORAGE_KEYS.installGuide
 const TOAST_TIMEOUT_MS = 3200
 const DAY_IN_MS = 24 * 60 * 60 * 1000
 const INSTALL_PROMPT_SNOOZE_DAYS = 10
@@ -865,7 +875,11 @@ function applyPositionReduction(metric, quantity, fallbackReductionValue = 0) {
   }
 }
 
-function calculatePortfolioFromData(assets, movements) {
+function calculatePortfolioFromData(
+  assets,
+  movements,
+  { useAssetValuation = true } = {},
+) {
   const normalizedAssets = ensureCashAsset(assets)
   const assetMap = new Map(normalizedAssets.map((asset) => [asset.id, normalizeAssetMetric(asset)]))
   const cashAssetId = getCashAssetId(normalizedAssets)
@@ -971,9 +985,14 @@ function calculatePortfolioFromData(assets, movements) {
 
     let currentValue = appliedValue + metric.yields
 
-    if (Number.isFinite(metric.currentTotalValue) && metric.currentTotalValue >= 0) {
+    if (
+      useAssetValuation &&
+      Number.isFinite(metric.currentTotalValue) &&
+      metric.currentTotalValue >= 0
+    ) {
       currentValue = metric.currentTotalValue
     } else if (
+      useAssetValuation &&
       metric.assetType !== INVESTMENT_CASH_TYPE &&
       Number.isFinite(metric.currentUnitPrice) &&
       metric.currentUnitPrice > 0 &&
@@ -1076,7 +1095,9 @@ function calculateInvestmentEvolution(assets, movements, months = 6) {
   return monthKeys.map((monthKey) => {
     const monthEnd = getEndOfMonthIso(monthKey)
     const movementsUntilMonth = movements.filter((movement) => movement.date <= monthEnd)
-    const snapshot = calculatePortfolioFromData(assets, movementsUntilMonth)
+    const snapshot = calculatePortfolioFromData(assets, movementsUntilMonth, {
+      useAssetValuation: false,
+    })
 
     return {
       monthKey,
@@ -1101,51 +1122,6 @@ function normalizeSearchText(value) {
     .replace(/\p{Diacritic}/gu, '')
     .toLowerCase()
     .trim()
-}
-
-function getInvestmentClassBucket(assetType) {
-  if (assetType === INVESTMENT_CASH_TYPE) {
-    return 'caixa'
-  }
-
-  if (assetType === 'Poupança' || assetType === 'Tesouro Direto' || assetType === 'CDB') {
-    return 'renda_fixa'
-  }
-
-  return 'renda_variavel'
-}
-
-function getFinancialBalanceUntilMonth(entries, monthKey) {
-  const monthEnd = getEndOfMonthIso(monthKey)
-
-  return entries
-    .filter((entry) => entry.date <= monthEnd)
-    .reduce(
-      (total, entry) => total + (entry.type === 'receita' ? entry.value : -entry.value),
-      0,
-    )
-}
-
-function calculateConsolidatedEvolution(entries, assets, movements, months = 6) {
-  const monthKeys = getRecentMonthKeys(months)
-
-  return monthKeys.map((monthKey) => {
-    const monthEnd = getEndOfMonthIso(monthKey)
-    const financialBalance = getFinancialBalanceUntilMonth(entries, monthKey)
-    const investmentSnapshot = calculatePortfolioFromData(
-      assets,
-      movements.filter((movement) => movement.date <= monthEnd),
-    )
-    const investmentBalance = investmentSnapshot.totals.currentTotal
-
-    return {
-      monthKey,
-      label: getMonthLabelFromKey(monthKey),
-      financialBalance,
-      investmentBalance,
-      total: financialBalance + investmentBalance,
-    }
-  })
 }
 
 function validateFormData(formData) {
@@ -1848,8 +1824,6 @@ function App() {
   const now = new Date()
   const currentMonthKey = getCurrentMonthKey()
   const monthLabel = now.toLocaleDateString('pt-BR', { month: 'long' })
-  const elapsedDays = Math.max(now.getDate(), 1)
-  const remainingDays = getLastDayOfMonth(now.getFullYear(), now.getMonth() + 1) - elapsedDays
 
   const orderedEntries = useMemo(
     () => [...entries].sort((a, b) => b.date.localeCompare(a.date)),
@@ -1966,13 +1940,7 @@ function App() {
   )
 
   const monthlyBalance = monthlySummary.income - monthlySummary.expense
-  const expenseRatio =
-    monthlySummary.income > 0 ? Math.min((monthlySummary.expense / monthlySummary.income) * 100, 999) : 0
-  const highestMonthlyValue = Math.max(monthlySummary.income, monthlySummary.expense, 1)
-  const incomeBarWidth = Math.round((monthlySummary.income / highestMonthlyValue) * 100)
-  const expenseBarWidth = Math.round((monthlySummary.expense / highestMonthlyValue) * 100)
   const savingsRate = monthlySummary.income > 0 ? (monthlyBalance / monthlySummary.income) * 100 : 0
-  const averageDailyExpense = monthlySummary.expense / elapsedDays
 
   const monthlyExpenseTotals = useMemo(() => {
     const totals = new Map()
@@ -2070,87 +2038,6 @@ function App() {
   const topInvestmentClasses = useMemo(
     () => investmentClassSummary.slice(0, 6),
     [investmentClassSummary],
-  )
-
-  const investmentBucketTotals = useMemo(
-    () =>
-      portfolioItems.reduce(
-        (acc, item) => {
-          const bucket = getInvestmentClassBucket(item.assetType)
-          acc[bucket] += item.currentValue
-          return acc
-        },
-        { caixa: 0, renda_fixa: 0, renda_variavel: 0 },
-      ),
-    [portfolioItems],
-  )
-
-  const consolidatedEvolution = useMemo(
-    () =>
-      calculateConsolidatedEvolution(
-        entries,
-        investmentAssetsSafe,
-        investmentMovements,
-        6,
-      ),
-    [entries, investmentAssetsSafe, investmentMovements],
-  )
-
-  const latestConsolidatedPoint =
-    consolidatedEvolution[consolidatedEvolution.length - 1] ?? null
-  const previousConsolidatedPoint =
-    consolidatedEvolution[consolidatedEvolution.length - 2] ?? null
-
-  const consolidatedPatrimony = latestConsolidatedPoint
-    ? latestConsolidatedPoint.total
-    : totalBalance + portfolioTotals.currentTotal
-
-  const consolidatedMonthDelta = previousConsolidatedPoint
-    ? consolidatedPatrimony - previousConsolidatedPoint.total
-    : 0
-  const consolidatedMonthDeltaPercent =
-    previousConsolidatedPoint && previousConsolidatedPoint.total !== 0
-      ? (consolidatedMonthDelta / previousConsolidatedPoint.total) * 100
-      : 0
-
-  const consolidatedAllocation = useMemo(() => {
-    const buckets = [
-      {
-        key: 'caixa',
-        label: 'Caixa',
-        value: investmentBucketTotals.caixa + totalBalance,
-      },
-      {
-        key: 'renda_fixa',
-        label: 'Renda fixa',
-        value: investmentBucketTotals.renda_fixa,
-      },
-      {
-        key: 'renda_variavel',
-        label: 'Renda variável',
-        value: investmentBucketTotals.renda_variavel,
-      },
-    ]
-
-    const positiveTotal = buckets.reduce(
-      (sum, bucket) => sum + Math.max(bucket.value, 0),
-      0,
-    )
-
-    return buckets.map((bucket) => ({
-      ...bucket,
-      percentage:
-        positiveTotal > 0 ? (Math.max(bucket.value, 0) / positiveTotal) * 100 : 0,
-    }))
-  }, [investmentBucketTotals, totalBalance])
-
-  const maxConsolidatedEvolutionValue = useMemo(
-    () =>
-      Math.max(
-        1,
-        ...consolidatedEvolution.map((item) => item.total),
-      ),
-    [consolidatedEvolution],
   )
 
   const monthlyInvestmentMovements = useMemo(
@@ -3200,46 +3087,19 @@ function App() {
               </article>
             )}
 
-            <article className="balance-card consolidated-balance-card">
+            <article className="balance-card">
               <div className="balance-head">
-                <p className="section-label">Patrimônio consolidado</p>
-                <Icon name="trend" />
+                <p className="section-label">Saldo disponível em caixa</p>
+                <Icon name="wallet" />
               </div>
-              <h2 className="main-balance">{formatCurrency(consolidatedPatrimony)}</h2>
-              <div className="consolidated-breakdown">
-                <small>Finanças: {formatCurrency(totalBalance)}</small>
-                <small>Investimentos: {formatCurrency(portfolioTotals.currentTotal)}</small>
-              </div>
-              {previousConsolidatedPoint ? (
-                <p
-                  className={`balance-trend ${consolidatedMonthDelta >= 0 ? 'positive' : 'negative'}`}
-                >
-                  Vs {previousConsolidatedPoint.label}:{' '}
-                  {consolidatedMonthDelta >= 0 ? '+' : '-'}
-                  {formatCurrency(Math.abs(consolidatedMonthDelta))} (
-                  {consolidatedMonthDeltaPercent >= 0 ? '+' : ''}
-                  {consolidatedMonthDeltaPercent.toFixed(1)}%)
-                </p>
-              ) : (
-                <p className="balance-trend">A comparação mensal aparece no próximo fechamento.</p>
-              )}
+              <h2 className="main-balance">{formatCurrency(totalBalance)}</h2>
+              <p className={`balance-trend ${monthlyBalance >= 0 ? 'positive' : 'negative'}`}>
+                Saldo de {monthLabel}: {monthlyBalance >= 0 ? '+' : '-'}
+                {formatCurrency(Math.abs(monthlyBalance))}
+              </p>
             </article>
 
             <div className="metrics-grid">
-              <article className="metric-card">
-                <div className="metric-top">
-                  <p>Saldo financeiro</p>
-                  <Icon name="wallet" size={16} />
-                </div>
-                <strong>{formatCurrency(totalBalance)}</strong>
-              </article>
-              <article className="metric-card">
-                <div className="metric-top">
-                  <p>Investimentos</p>
-                  <Icon name="investments" size={16} />
-                </div>
-                <strong>{formatCurrency(portfolioTotals.currentTotal)}</strong>
-              </article>
               <article className="metric-card income">
                 <div className="metric-top">
                   <p>Receitas do mês</p>
@@ -3254,101 +3114,33 @@ function App() {
                 </div>
                 <strong>{formatCurrency(monthlySummary.expense)}</strong>
               </article>
+              <article className="metric-card">
+                <div className="metric-top">
+                  <p>Saldo do mês</p>
+                  <Icon name="reports" size={16} />
+                </div>
+                <strong className={monthlyBalance >= 0 ? 'positive' : 'negative'}>
+                  {formatCurrency(monthlyBalance)}
+                </strong>
+              </article>
             </div>
 
             <article className="panel">
               <div className="panel-heading">
                 <h3>
-                  <Icon name="pie" size={16} className="heading-icon" />
-                  Alocação patrimonial
-                </h3>
-                <span>Caixa, fixa e variável</span>
-              </div>
-
-              <ul className="allocation-list">
-                {consolidatedAllocation.map((bucket) => (
-                  <li key={bucket.key} className="allocation-item">
-                    <div className="allocation-head">
-                      <strong>{bucket.label}</strong>
-                      <small>{bucket.percentage.toFixed(1)}%</small>
-                    </div>
-                    <div className="goal-progress-track">
-                      <div
-                        className={`goal-progress-fill allocation-${bucket.key}`}
-                        style={{ width: `${Math.min(bucket.percentage, 100)}%` }}
-                      />
-                    </div>
-                    <small>{formatCurrency(bucket.value)}</small>
-                  </li>
-                ))}
-              </ul>
-            </article>
-
-            <article className="panel">
-              <div className="panel-heading">
-                <h3>
-                  <Icon name="trend" size={16} className="heading-icon" />
-                  Evolução patrimonial consolidada
-                </h3>
-                <span>Últimos {consolidatedEvolution.length} meses</span>
-              </div>
-
-              {consolidatedEvolution.length === 0 ? (
-                <div className="empty-state compact">
-                  <Icon name="trend" />
-                  <p>Sem histórico suficiente para evolução consolidada.</p>
-                  <small>O gráfico mensal cresce conforme você usa o app.</small>
-                </div>
-              ) : (
-                <div className="evolution-list consolidated">
-                  {consolidatedEvolution.map((item) => (
-                    <div key={item.monthKey} className="evolution-item">
-                      <div className="evolution-head">
-                        <small>{item.label}</small>
-                        <strong>{formatCurrency(item.total)}</strong>
-                      </div>
-                      <div className="goal-progress-track">
-                        <div
-                          className="goal-progress-fill"
-                          style={{
-                            width: `${Math.min((item.total / maxConsolidatedEvolutionValue) * 100, 100)}%`,
-                          }}
-                        />
-                      </div>
-                      <div className="consolidated-split">
-                        <small>Finanças: {formatCurrency(item.financialBalance)}</small>
-                        <small>Invest.: {formatCurrency(item.investmentBalance)}</small>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </article>
-
-            <article className="panel">
-              <div className="panel-heading">
-                <h3>
                   <Icon name="investments" size={16} className="heading-icon" />
-                  Investimentos
+                  Investimentos (resumo)
                 </h3>
                 <span>{portfolioItems.length} ativos</span>
               </div>
 
               <div className="summary-grid investments-quick-grid">
                 <div className="summary-item">
-                  <p>Patrimônio total</p>
-                  <strong>{formatCurrency(portfolioTotals.currentTotal)}</strong>
-                </div>
-                <div className="summary-item">
-                  <p>Investido</p>
+                  <p>Patrimônio investido</p>
                   <strong>{formatCurrency(portfolioTotals.investedCurrent)}</strong>
                 </div>
                 <div className="summary-item">
-                  <p>Caixa disponível</p>
-                  <strong>{formatCurrency(portfolioTotals.cashCurrent)}</strong>
-                </div>
-                <div className="summary-item">
-                  <p>Rendimentos</p>
+                  <p>Rendimento acumulado</p>
                   <strong className={portfolioTotals.variationTotal >= 0 ? 'positive' : 'negative'}>
                     {formatCurrency(accumulatedYieldFromMovements)}
                   </strong>
@@ -3369,56 +3161,42 @@ function App() {
 
             <article className="panel">
               <div className="panel-heading">
-                <h3>Resumo de {monthLabel}</h3>
-                <span>{monthlyEntries.length} lançamentos</span>
+                <h3>Extrato simplificado</h3>
+                <span>{orderedEntries.length} movimentações</span>
               </div>
 
-              <div className="summary-grid">
-                <div className="summary-item">
-                  <p>Saldo mensal</p>
-                  <strong className={monthlyBalance >= 0 ? 'positive' : 'negative'}>
-                    {formatCurrency(monthlyBalance)}
-                  </strong>
+              {orderedEntries.length === 0 ? (
+                <div className="empty-state">
+                  <Icon name="history" />
+                  <p>Nenhuma movimentação financeira registrada.</p>
+                  <small>As receitas e despesas mais recentes aparecerão aqui como extrato.</small>
                 </div>
-                <div className="summary-item">
-                  <p>Taxa de economia</p>
-                  <strong className={savingsRate >= 0 ? 'positive' : 'negative'}>
-                    {savingsRate.toFixed(1)}%
-                  </strong>
-                </div>
-                <div className="summary-item">
-                  <p>Média de gastos/dia</p>
-                  <strong>{formatCurrency(averageDailyExpense)}</strong>
-                </div>
-                <div className="summary-item">
-                  <p>Dias restantes</p>
-                  <strong>{remainingDays > 0 ? `${remainingDays} dias` : 'Último dia'}</strong>
-                </div>
-              </div>
-            </article>
-
-            <article className="panel">
-              <div className="panel-heading">
-                <h3>Resumo visual</h3>
-                <span>{Math.round(expenseRatio)}% consumido</span>
-              </div>
-
-              <div className="bar-list">
-                <div className="bar-row">
-                  <span>Receitas</span>
-                  <div className="bar-track">
-                    <div className="bar income-fill" style={{ width: `${incomeBarWidth}%` }} />
-                  </div>
-                  <strong>{formatCurrency(monthlySummary.income)}</strong>
-                </div>
-                <div className="bar-row">
-                  <span>Despesas</span>
-                  <div className="bar-track">
-                    <div className="bar expense-fill" style={{ width: `${expenseBarWidth}%` }} />
-                  </div>
-                  <strong>{formatCurrency(monthlySummary.expense)}</strong>
-                </div>
-              </div>
+              ) : (
+                <ul className="entry-list full">
+                  {orderedEntries.slice(0, 8).map((entry) => (
+                    <li key={entry.id} className="entry-item">
+                      <div className="entry-main">
+                        <p className="entry-title">{entry.category}</p>
+                        <div className="entry-meta">
+                          <small>{getDisplayDate(entry.date)}</small>
+                          <span className={`type-pill ${entry.type}`}>{getTypeLabel(entry.type)}</span>
+                          {entry.recurrence === 'monthly' && (
+                            <span className="tag-pill recurring">
+                              <Icon name="repeat" size={12} />
+                              Mensal
+                            </span>
+                          )}
+                        </div>
+                        {entry.description && <small>{entry.description}</small>}
+                      </div>
+                      <strong className={entry.type === 'receita' ? 'positive' : 'negative'}>
+                        {entry.type === 'receita' ? '+' : '-'}
+                        {formatCurrency(entry.value)}
+                      </strong>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </article>
 
             <article className="panel">
@@ -3461,44 +3239,6 @@ function App() {
                 </ul>
               </article>
             )}
-
-            <article className="panel">
-              <div className="panel-heading">
-                <h3>Últimos lançamentos</h3>
-                <span>{orderedEntries.length} itens</span>
-              </div>
-
-              {orderedEntries.length === 0 ? (
-                <div className="empty-state">
-                  <Icon name="empty" />
-                  <p>Nenhum lançamento registrado ainda.</p>
-                  <small>Use a aba Lançar para começar seu controle diário.</small>
-                </div>
-              ) : (
-                <ul className="entry-list">
-                  {orderedEntries.slice(0, 4).map((entry) => (
-                    <li key={entry.id} className="entry-item">
-                      <div className="entry-main">
-                        <p className="entry-title">{entry.category}</p>
-                        <div className="entry-meta">
-                          <small>{getDisplayDate(entry.date)}</small>
-                          {entry.recurrence === 'monthly' && (
-                            <span className="tag-pill recurring">
-                              <Icon name="repeat" size={12} />
-                              Mensal
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <strong className={entry.type === 'receita' ? 'positive' : 'negative'}>
-                        {entry.type === 'receita' ? '+' : '-'}
-                        {formatCurrency(entry.value)}
-                      </strong>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </article>
           </section>
         )}
 
