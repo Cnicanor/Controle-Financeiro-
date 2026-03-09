@@ -56,6 +56,7 @@ const STORAGE_KEYS = Object.freeze({
   investmentMovements: 'controle_financeiro_investment_movements_v1',
   investmentJournal: 'controle_financeiro_investment_journal_v1',
   installGuide: 'controle_financeiro_install_guide_v1',
+  theme: 'financas.theme',
 })
 const STORAGE_ENTRIES_KEY = STORAGE_KEYS.entries
 const LEGACY_STORAGE_ENTRIES_KEY = STORAGE_KEYS.legacyEntries
@@ -65,9 +66,15 @@ const STORAGE_INVESTMENT_ASSETS_KEY = STORAGE_KEYS.investmentAssets
 const STORAGE_INVESTMENT_MOVEMENTS_KEY = STORAGE_KEYS.investmentMovements
 const STORAGE_INVESTMENT_JOURNAL_KEY = STORAGE_KEYS.investmentJournal
 const STORAGE_INSTALL_GUIDE_KEY = STORAGE_KEYS.installGuide
+const STORAGE_THEME_KEY = STORAGE_KEYS.theme
 const TOAST_TIMEOUT_MS = 3200
 const DAY_IN_MS = 24 * 60 * 60 * 1000
 const INSTALL_PROMPT_SNOOZE_DAYS = 10
+const THEME_OPTIONS = Object.freeze([
+  { value: 'system', label: 'Seguir sistema', icon: 'system' },
+  { value: 'light', label: 'Tema claro', icon: 'sun' },
+  { value: 'dark', label: 'Tema escuro', icon: 'moon' },
+])
 
 const currencyFormatter = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
@@ -765,6 +772,58 @@ function detectIosSafariInstallable() {
     !/CriOS|FxiOS|EdgiOS|OPiOS|SamsungBrowser|DuckDuckGo/i.test(ua)
 
   return isIosDevice && isSafariBrowser
+}
+
+function normalizeThemePreference(rawTheme) {
+  if (rawTheme === 'light' || rawTheme === 'dark' || rawTheme === 'system') {
+    return rawTheme
+  }
+
+  return 'system'
+}
+
+function detectSystemTheme() {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return 'light'
+  }
+
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+function loadThemePreference() {
+  if (typeof window === 'undefined') {
+    return 'system'
+  }
+
+  try {
+    const rawTheme = window.localStorage.getItem(STORAGE_THEME_KEY)
+    return normalizeThemePreference(rawTheme)
+  } catch {
+    return 'system'
+  }
+}
+
+function saveThemePreference(themePreference) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(STORAGE_THEME_KEY, normalizeThemePreference(themePreference))
+  } catch {
+    // armazenamento local indisponível; segue sem persistir preferência
+  }
+}
+
+function getThemeLabel(themeOption) {
+  switch (themeOption) {
+    case 'light':
+      return 'claro'
+    case 'dark':
+      return 'escuro'
+    default:
+      return 'sistema'
+  }
 }
 
 function loadInstallGuideState() {
@@ -1823,6 +1882,26 @@ function Icon({ name, size = 18, className = '' }) {
           <path d="M20.5 13a8.5 8.5 0 1 1-10-10" />
         </svg>
       )
+    case 'sun':
+      return (
+        <svg {...baseProps}>
+          <circle cx="12" cy="12" r="4.2" />
+          <path d="M12 2.5v2.2M12 19.3v2.2M4.7 4.7l1.6 1.6M17.7 17.7l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.7 19.3l1.6-1.6M17.7 6.3l1.6-1.6" />
+        </svg>
+      )
+    case 'moon':
+      return (
+        <svg {...baseProps}>
+          <path d="M20 14.4A8.3 8.3 0 1 1 9.6 4a7 7 0 0 0 10.4 10.4z" />
+        </svg>
+      )
+    case 'system':
+      return (
+        <svg {...baseProps}>
+          <rect x="3.5" y="4.5" width="17" height="12" rx="2.2" />
+          <path d="M8.5 20h7M12 16.5V20" />
+        </svg>
+      )
     case 'share':
       return (
         <svg {...baseProps}>
@@ -1887,6 +1966,9 @@ function App() {
     assetType: 'todos',
     movementType: 'todos',
   })
+  const [themePreference, setThemePreference] = useState(() => loadThemePreference())
+  const [systemTheme, setSystemTheme] = useState(() => detectSystemTheme())
+  const [isThemeSelectorOpen, setIsThemeSelectorOpen] = useState(false)
   const [globalSearchQuery, setGlobalSearchQuery] = useState('')
   const [launchSavedPulse, setLaunchSavedPulse] = useState(false)
   const [editingInvestmentAssetId, setEditingInvestmentAssetId] = useState(null)
@@ -1907,6 +1989,7 @@ function App() {
   )
 
   const importInputRef = useRef(null)
+  const themeSelectorRef = useRef(null)
   const deferredInstallPromptRef = useRef(null)
   const isEditingInvestmentAsset = editingInvestmentAssetId !== null
   const isEditing = editingEntryId !== null
@@ -2000,6 +2083,7 @@ function App() {
     isInstallGuideDismissed,
     isIosSafariInstallable,
   ])
+  const activeTheme = themePreference === 'system' ? systemTheme : themePreference
 
   const monthlyEntries = useMemo(
     () => entries.filter((entry) => isInCurrentMonth(entry.date)),
@@ -2374,6 +2458,81 @@ function App() {
   }, [installGuideState])
 
   useEffect(() => {
+    saveThemePreference(themePreference)
+  }, [themePreference])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return undefined
+    }
+
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    const updateSystemTheme = () => {
+      setSystemTheme(mediaQuery.matches ? 'dark' : 'light')
+    }
+
+    updateSystemTheme()
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', updateSystemTheme)
+    } else if (typeof mediaQuery.addListener === 'function') {
+      mediaQuery.addListener(updateSystemTheme)
+    }
+
+    return () => {
+      if (typeof mediaQuery.removeEventListener === 'function') {
+        mediaQuery.removeEventListener('change', updateSystemTheme)
+      } else if (typeof mediaQuery.removeListener === 'function') {
+        mediaQuery.removeListener(updateSystemTheme)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return
+    }
+
+    document.body.classList.remove('light', 'dark')
+    document.body.classList.add(activeTheme)
+    document.body.dataset.themePreference = themePreference
+  }, [activeTheme, themePreference])
+
+  useEffect(() => {
+    if (!isThemeSelectorOpen || typeof document === 'undefined') {
+      return undefined
+    }
+
+    const handleOutsidePress = (event) => {
+      if (themeSelectorRef.current?.contains(event.target)) {
+        return
+      }
+
+      setIsThemeSelectorOpen(false)
+    }
+
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setIsThemeSelectorOpen(false)
+      }
+    }
+
+    document.addEventListener('pointerdown', handleOutsidePress)
+    document.addEventListener('keydown', handleEscape)
+
+    return () => {
+      document.removeEventListener('pointerdown', handleOutsidePress)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [isThemeSelectorOpen])
+
+  useEffect(() => {
+    if (activeTab !== 'home' && isThemeSelectorOpen) {
+      setIsThemeSelectorOpen(false)
+    }
+  }, [activeTab, isThemeSelectorOpen])
+
+  useEffect(() => {
     if (typeof window === 'undefined') {
       return undefined
     }
@@ -2474,6 +2633,22 @@ function App() {
 
   const showToast = (type, message) => {
     setToast({ type, message })
+  }
+
+  const handleToggleThemeSelector = () => {
+    setIsThemeSelectorOpen((previous) => !previous)
+  }
+
+  const handleSelectTheme = (nextTheme) => {
+    const normalizedTheme = normalizeThemePreference(nextTheme)
+    setThemePreference(normalizedTheme)
+    setIsThemeSelectorOpen(false)
+    showToast(
+      'info',
+      normalizedTheme === 'system'
+        ? `Tema ajustado para seguir o sistema (${getThemeLabel(systemTheme)}).`
+        : `Tema ${getThemeLabel(normalizedTheme)} aplicado.`,
+    )
   }
 
   const resetLaunchForm = (type = 'despesa') => {
@@ -3195,15 +3370,66 @@ function App() {
 
       <main className="app-content">
         <header className="top-header">
-          <p className="eyebrow">Controle diário</p>
-          <h1>Meu Financeiro</h1>
-          <p className="header-date">
-            {now.toLocaleDateString('pt-BR', {
-              weekday: 'long',
-              day: '2-digit',
-              month: 'long',
-            })}
-          </p>
+          <div className="top-header-main">
+            <div className="top-header-info">
+              <p className="eyebrow">Controle diário</p>
+              <h1>Meu Financeiro</h1>
+              <p className="header-date">
+                {now.toLocaleDateString('pt-BR', {
+                  weekday: 'long',
+                  day: '2-digit',
+                  month: 'long',
+                })}
+              </p>
+            </div>
+
+            {activeTab === 'home' && (
+              <div className="theme-selector" ref={themeSelectorRef}>
+                <button
+                  className="icon-button theme-trigger"
+                  type="button"
+                  onClick={handleToggleThemeSelector}
+                  aria-label="Abrir seletor de tema"
+                  aria-haspopup="menu"
+                  aria-expanded={isThemeSelectorOpen}
+                >
+                  <Icon
+                    name={
+                      themePreference === 'system'
+                        ? 'system'
+                        : activeTheme === 'dark'
+                          ? 'moon'
+                          : 'sun'
+                    }
+                    size={16}
+                  />
+                </button>
+
+                {isThemeSelectorOpen && (
+                  <div className="theme-selector-menu" role="menu" aria-label="Selecionar tema">
+                    {THEME_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`theme-option ${themePreference === option.value ? 'active' : ''}`}
+                        onClick={() => handleSelectTheme(option.value)}
+                        role="menuitemradio"
+                        aria-checked={themePreference === option.value}
+                      >
+                        <span className="theme-option-main">
+                          <Icon name={option.icon} size={15} />
+                          {option.label}
+                        </span>
+                        {option.value === 'system' && (
+                          <small>{systemTheme === 'dark' ? 'Sistema: escuro' : 'Sistema: claro'}</small>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </header>
 
         {activeTab === 'home' && (

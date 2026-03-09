@@ -5,17 +5,83 @@
   line-height: 1.4;
   font-weight: 500;
   --bg: #edf3f7;
+  --bg-accent-a: #d9f4f1;
+  --bg-accent-b: #fdf1d9;
   --surface: #ffffff;
+  --surface-elevated: #ffffff;
   --surface-muted: #f8fafc;
   --text: #0f172a;
   --muted: #64748b;
   --border: #dfe7f0;
+  --border-strong: #c3d4e6;
+  --track-muted: #e8edf3;
+  --nav-bg: rgba(250, 252, 254, 0.94);
+  --nav-active-bg: #e7f5f4;
+  --nav-active-text: #0f3a46;
+  --nav-indicator: #b8c8d8;
+  --heading-accent: #0f766e;
+  --icon-button-border: #c9d8e8;
+  --icon-button-bg: rgba(255, 255, 255, 0.74);
+  --icon-button-text: #334155;
+  --danger-soft-bg: #fff7ed;
+  --danger-soft-border: #fed7aa;
+  --danger-soft-text: #c2410c;
+  --input-error-bg: #fff5f5;
+  --goal-near-bg: #fffaf4;
+  --goal-near-border: #fdba74;
+  --goal-over-bg: #fff5f5;
+  --goal-over-border: #fca5a5;
+  --warning-bg: #fffaf4;
+  --warning-border: #fdba74;
+  --warning-text: #7c2d12;
+  --shell-shadow: rgba(9, 38, 66, 0.12);
   --success: #15803d;
   --danger: #c2410c;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+body.light {
+  color-scheme: light;
+}
+
+body.dark {
+  color-scheme: dark;
+  --bg: #081221;
+  --bg-accent-a: #133338;
+  --bg-accent-b: #2d2a1b;
+  --surface: #0f1b2d;
+  --surface-elevated: #13243a;
+  --surface-muted: #152238;
+  --text: #e2e8f0;
+  --muted: #9aa9bd;
+  --border: #2e405a;
+  --border-strong: #435873;
+  --track-muted: #23364f;
+  --nav-bg: rgba(10, 20, 36, 0.94);
+  --nav-active-bg: #143640;
+  --nav-active-text: #d7f7f1;
+  --nav-indicator: #57708c;
+  --heading-accent: #2dd4bf;
+  --icon-button-border: #44607e;
+  --icon-button-bg: rgba(19, 36, 58, 0.86);
+  --icon-button-text: #d0d9e8;
+  --danger-soft-bg: #3b2020;
+  --danger-soft-border: #8d4848;
+  --danger-soft-text: #fecaca;
+  --input-error-bg: #38232b;
+  --goal-near-bg: #312416;
+  --goal-near-border: #9a5b1f;
+  --goal-over-bg: #3a1f27;
+  --goal-over-border: #9a4d63;
+  --warning-bg: #2f2418;
+  --warning-border: #926127;
+  --warning-text: #f6d3ab;
+  --shell-shadow: rgba(2, 6, 23, 0.48);
+  --success: #4ade80;
+  --danger: #fda46c;
 }
 
 *,
@@ -30,7 +96,8 @@ body {
   min-height: 100vh;
   color: var(--text);
   background:
-    radial-gradient(circle at 12% 8%, #d9f4f1 0%, transparent 30%),
-    radial-gradient(circle at 88% 2%, #fdf1d9 0%, transparent 26%),
+    radial-gradient(circle at 12% 8%, var(--bg-accent-a) 0%, transparent 30%),
+    radial-gradient(circle at 88% 2%, var(--bg-accent-b) 0%, transparent 26%),
     var(--bg);
+  transition: background 180ms ease, color 180ms ease;
 }

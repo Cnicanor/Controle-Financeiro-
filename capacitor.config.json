@@ -1,0 +1,6 @@
+{
+  "appId": "com.cnicanor.controlefinanceiro",
+  "appName": "Controle Financeiro",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}
