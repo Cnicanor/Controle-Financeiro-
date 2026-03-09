@@ -1,11 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
-const TAB_ITEMS = [
+const PRIMARY_TAB_ITEMS = [
   { id: 'home', label: 'Início', icon: 'home' },
-  { id: 'launch', label: 'Lançar', icon: 'plus' },
-  { id: 'history', label: 'Histórico', icon: 'history' },
+  { id: 'launch', label: 'Lançar', icon: 'plus', isAction: true },
+  { id: 'credit', label: 'Crédito', icon: 'credit' },
+]
+
+const SECONDARY_MENU_ITEMS = [
   { id: 'investments', label: 'Investimentos', icon: 'investments' },
+  { id: 'history', label: 'Histórico', icon: 'history' },
   { id: 'reports', label: 'Relatórios', icon: 'reports' },
 ]
 
@@ -57,6 +61,7 @@ const STORAGE_KEYS = Object.freeze({
   investmentJournal: 'controle_financeiro_investment_journal_v1',
   installGuide: 'controle_financeiro_install_guide_v1',
   theme: 'financas.theme',
+  currency: 'financas.currency',
 })
 const STORAGE_ENTRIES_KEY = STORAGE_KEYS.entries
 const LEGACY_STORAGE_ENTRIES_KEY = STORAGE_KEYS.legacyEntries
@@ -67,6 +72,7 @@ const STORAGE_INVESTMENT_MOVEMENTS_KEY = STORAGE_KEYS.investmentMovements
 const STORAGE_INVESTMENT_JOURNAL_KEY = STORAGE_KEYS.investmentJournal
 const STORAGE_INSTALL_GUIDE_KEY = STORAGE_KEYS.installGuide
 const STORAGE_THEME_KEY = STORAGE_KEYS.theme
+const STORAGE_CURRENCY_KEY = STORAGE_KEYS.currency
 const TOAST_TIMEOUT_MS = 3200
 const DAY_IN_MS = 24 * 60 * 60 * 1000
 const INSTALL_PROMPT_SNOOZE_DAYS = 10
@@ -75,15 +81,17 @@ const THEME_OPTIONS = Object.freeze([
   { value: 'light', label: 'Tema claro', icon: 'sun' },
   { value: 'dark', label: 'Tema escuro', icon: 'moon' },
 ])
-
-const currencyFormatter = new Intl.NumberFormat('pt-BR', {
-  style: 'currency',
-  currency: 'BRL',
-})
-
-function formatCurrency(value) {
-  return currencyFormatter.format(value)
-}
+const CURRENCY_OPTIONS = Object.freeze([
+  { value: 'BRL', label: 'BRL', locale: 'pt-BR' },
+  { value: 'USD', label: 'USD', locale: 'en-US' },
+  { value: 'EUR', label: 'EUR', locale: 'de-DE' },
+])
+const CURRENCY_META = Object.freeze(
+  CURRENCY_OPTIONS.reduce((acc, option) => {
+    acc[option.value] = option
+    return acc
+  }, {}),
+)
 
 function padNumber(value) {
   return String(value).padStart(2, '0')
@@ -823,6 +831,39 @@ function getThemeLabel(themeOption) {
       return 'escuro'
     default:
       return 'sistema'
+  }
+}
+
+function normalizeCurrencyCode(rawCurrency) {
+  return CURRENCY_META[rawCurrency] ? rawCurrency : 'BRL'
+}
+
+function getCurrencyOption(currencyCode) {
+  return CURRENCY_META[normalizeCurrencyCode(currencyCode)]
+}
+
+function loadCurrencyPreference() {
+  if (typeof window === 'undefined') {
+    return 'BRL'
+  }
+
+  try {
+    const rawCurrency = window.localStorage.getItem(STORAGE_CURRENCY_KEY)
+    return normalizeCurrencyCode(rawCurrency)
+  } catch {
+    return 'BRL'
+  }
+}
+
+function saveCurrencyPreference(currencyCode) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(STORAGE_CURRENCY_KEY, normalizeCurrencyCode(currencyCode))
+  } catch {
+    // armazenamento local indisponível; segue sem persistir preferência
   }
 }
 
@@ -1682,6 +1723,14 @@ function Icon({ name, size = 18, className = '' }) {
           <path d="M12 8v8M8 12h8" />
         </svg>
       )
+    case 'credit':
+      return (
+        <svg {...baseProps}>
+          <rect x="3" y="6" width="18" height="12" rx="2.4" />
+          <path d="M3 10.2h18" />
+          <path d="M7 14h3.2" />
+        </svg>
+      )
     case 'history':
       return (
         <svg {...baseProps}>
@@ -1902,6 +1951,18 @@ function Icon({ name, size = 18, className = '' }) {
           <path d="M8.5 20h7M12 16.5V20" />
         </svg>
       )
+    case 'menu':
+      return (
+        <svg {...baseProps}>
+          <path d="M4 7h16M4 12h16M4 17h16" />
+        </svg>
+      )
+    case 'chevron-right':
+      return (
+        <svg {...baseProps}>
+          <path d="m9 6 6 6-6 6" />
+        </svg>
+      )
     case 'share':
       return (
         <svg {...baseProps}>
@@ -1969,6 +2030,8 @@ function App() {
   const [themePreference, setThemePreference] = useState(() => loadThemePreference())
   const [systemTheme, setSystemTheme] = useState(() => detectSystemTheme())
   const [isThemeSelectorOpen, setIsThemeSelectorOpen] = useState(false)
+  const [isSecondaryMenuOpen, setIsSecondaryMenuOpen] = useState(false)
+  const [currencyCode, setCurrencyCode] = useState(() => loadCurrencyPreference())
   const [globalSearchQuery, setGlobalSearchQuery] = useState('')
   const [launchSavedPulse, setLaunchSavedPulse] = useState(false)
   const [editingInvestmentAssetId, setEditingInvestmentAssetId] = useState(null)
@@ -1990,12 +2053,27 @@ function App() {
 
   const importInputRef = useRef(null)
   const themeSelectorRef = useRef(null)
+  const secondaryMenuRef = useRef(null)
   const deferredInstallPromptRef = useRef(null)
   const isEditingInvestmentAsset = editingInvestmentAssetId !== null
   const isEditing = editingEntryId !== null
   const now = new Date()
   const currentMonthKey = getCurrentMonthKey()
   const monthLabel = now.toLocaleDateString('pt-BR', { month: 'long' })
+  const activeCurrencyCode = normalizeCurrencyCode(currencyCode)
+  const activeCurrencyOption = getCurrencyOption(activeCurrencyCode)
+  const currencyFormatter = useMemo(
+    () =>
+      new Intl.NumberFormat(activeCurrencyOption.locale, {
+        style: 'currency',
+        currency: activeCurrencyCode,
+      }),
+    [activeCurrencyCode, activeCurrencyOption.locale],
+  )
+  const formatCurrency = useCallback(
+    (value) => currencyFormatter.format(value),
+    [currencyFormatter],
+  )
 
   const orderedEntries = useMemo(
     () => [...entries].sort((a, b) => b.date.localeCompare(a.date)),
@@ -2118,6 +2196,12 @@ function App() {
 
   const monthlyBalance = monthlySummary.income - monthlySummary.expense
   const savingsRate = monthlySummary.income > 0 ? (monthlyBalance / monthlySummary.income) * 100 : 0
+  const creditSuggestedLimit = monthlySummary.income > 0 ? monthlySummary.income * 0.3 : 0
+  const creditUsageRatio =
+    creditSuggestedLimit > 0
+      ? Math.min(monthlySummary.expense / creditSuggestedLimit, 1.4)
+      : 0
+  const creditRemaining = Math.max(creditSuggestedLimit - monthlySummary.expense, 0)
 
   const monthlyExpenseTotals = useMemo(() => {
     const totals = new Map()
@@ -2462,6 +2546,10 @@ function App() {
   }, [themePreference])
 
   useEffect(() => {
+    saveCurrencyPreference(activeCurrencyCode)
+  }, [activeCurrencyCode])
+
+  useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
       return undefined
     }
@@ -2527,10 +2615,44 @@ function App() {
   }, [isThemeSelectorOpen])
 
   useEffect(() => {
+    if (!isSecondaryMenuOpen || typeof document === 'undefined') {
+      return undefined
+    }
+
+    const handleOutsidePress = (event) => {
+      if (secondaryMenuRef.current?.contains(event.target)) {
+        return
+      }
+
+      setIsSecondaryMenuOpen(false)
+    }
+
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setIsSecondaryMenuOpen(false)
+      }
+    }
+
+    document.addEventListener('pointerdown', handleOutsidePress)
+    document.addEventListener('keydown', handleEscape)
+
+    return () => {
+      document.removeEventListener('pointerdown', handleOutsidePress)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [isSecondaryMenuOpen])
+
+  useEffect(() => {
     if (activeTab !== 'home' && isThemeSelectorOpen) {
       setIsThemeSelectorOpen(false)
     }
   }, [activeTab, isThemeSelectorOpen])
+
+  useEffect(() => {
+    if (isSecondaryMenuOpen) {
+      setIsSecondaryMenuOpen(false)
+    }
+  }, [activeTab, isSecondaryMenuOpen])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -2636,7 +2758,23 @@ function App() {
   }
 
   const handleToggleThemeSelector = () => {
-    setIsThemeSelectorOpen((previous) => !previous)
+    setIsThemeSelectorOpen((previous) => {
+      const next = !previous
+      if (next) {
+        setIsSecondaryMenuOpen(false)
+      }
+      return next
+    })
+  }
+
+  const handleToggleSecondaryMenu = () => {
+    setIsSecondaryMenuOpen((previous) => {
+      const next = !previous
+      if (next) {
+        setIsThemeSelectorOpen(false)
+      }
+      return next
+    })
   }
 
   const handleSelectTheme = (nextTheme) => {
@@ -2649,6 +2787,18 @@ function App() {
         ? `Tema ajustado para seguir o sistema (${getThemeLabel(systemTheme)}).`
         : `Tema ${getThemeLabel(normalizedTheme)} aplicado.`,
     )
+  }
+
+  const handleSelectCurrency = (nextCurrencyCode) => {
+    const normalizedCurrency = normalizeCurrencyCode(nextCurrencyCode)
+    setCurrencyCode(normalizedCurrency)
+    setIsSecondaryMenuOpen(false)
+    showToast('info', `Moeda alterada para ${normalizedCurrency}.`)
+  }
+
+  const handleNavigateFromMenu = (tabId) => {
+    setActiveTab(tabId)
+    setIsSecondaryMenuOpen(false)
   }
 
   const resetLaunchForm = (type = 'despesa') => {
@@ -3383,52 +3533,107 @@ function App() {
               </p>
             </div>
 
-            {activeTab === 'home' && (
-              <div className="theme-selector" ref={themeSelectorRef}>
+            <div className="header-actions">
+              {activeTab === 'home' && (
+                <div className="theme-selector" ref={themeSelectorRef}>
+                  <button
+                    className="icon-button theme-trigger"
+                    type="button"
+                    onClick={handleToggleThemeSelector}
+                    aria-label="Abrir seletor de tema"
+                    aria-haspopup="menu"
+                    aria-expanded={isThemeSelectorOpen}
+                  >
+                    <Icon
+                      name={
+                        themePreference === 'system'
+                          ? 'system'
+                          : activeTheme === 'dark'
+                            ? 'moon'
+                            : 'sun'
+                      }
+                      size={16}
+                    />
+                  </button>
+
+                  {isThemeSelectorOpen && (
+                    <div className="theme-selector-menu" role="menu" aria-label="Selecionar tema">
+                      {THEME_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className={`theme-option ${themePreference === option.value ? 'active' : ''}`}
+                          onClick={() => handleSelectTheme(option.value)}
+                          role="menuitemradio"
+                          aria-checked={themePreference === option.value}
+                        >
+                          <span className="theme-option-main">
+                            <Icon name={option.icon} size={15} />
+                            {option.label}
+                          </span>
+                          {option.value === 'system' && (
+                            <small>{systemTheme === 'dark' ? 'Sistema: escuro' : 'Sistema: claro'}</small>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="secondary-menu" ref={secondaryMenuRef}>
                 <button
-                  className="icon-button theme-trigger"
+                  className="icon-button menu-trigger"
                   type="button"
-                  onClick={handleToggleThemeSelector}
-                  aria-label="Abrir seletor de tema"
+                  onClick={handleToggleSecondaryMenu}
+                  aria-label="Abrir menu"
                   aria-haspopup="menu"
-                  aria-expanded={isThemeSelectorOpen}
+                  aria-expanded={isSecondaryMenuOpen}
                 >
-                  <Icon
-                    name={
-                      themePreference === 'system'
-                        ? 'system'
-                        : activeTheme === 'dark'
-                          ? 'moon'
-                          : 'sun'
-                    }
-                    size={16}
-                  />
+                  <Icon name="menu" size={16} />
                 </button>
 
-                {isThemeSelectorOpen && (
-                  <div className="theme-selector-menu" role="menu" aria-label="Selecionar tema">
-                    {THEME_OPTIONS.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className={`theme-option ${themePreference === option.value ? 'active' : ''}`}
-                        onClick={() => handleSelectTheme(option.value)}
-                        role="menuitemradio"
-                        aria-checked={themePreference === option.value}
+                {isSecondaryMenuOpen && (
+                  <div className="secondary-menu-panel" role="menu" aria-label="Menu secundário">
+                    <p className="menu-section-title">Áreas secundárias</p>
+                    <div className="secondary-menu-links">
+                      {SECONDARY_MENU_ITEMS.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className={`secondary-menu-link ${activeTab === item.id ? 'active' : ''}`}
+                          onClick={() => handleNavigateFromMenu(item.id)}
+                        >
+                          <span className="secondary-menu-link-main">
+                            <Icon name={item.icon} size={15} />
+                            {item.label}
+                          </span>
+                          <Icon name="chevron-right" size={14} />
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="menu-divider" />
+
+                    <label className="currency-selector">
+                      <span>
+                        <Icon name="wallet" size={14} /> Moeda
+                      </span>
+                      <select
+                        value={activeCurrencyCode}
+                        onChange={(event) => handleSelectCurrency(event.target.value)}
                       >
-                        <span className="theme-option-main">
-                          <Icon name={option.icon} size={15} />
-                          {option.label}
-                        </span>
-                        {option.value === 'system' && (
-                          <small>{systemTheme === 'dark' ? 'Sistema: escuro' : 'Sistema: claro'}</small>
-                        )}
-                      </button>
-                    ))}
+                        {CURRENCY_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
                 )}
               </div>
-            )}
+            </div>
           </div>
         </header>
 
@@ -3890,6 +4095,77 @@ function App() {
                   )}
                 </div>
               </form>
+            </article>
+          </section>
+        )}
+
+        {activeTab === 'credit' && (
+          <section className="screen">
+            <article className="panel">
+              <div className="panel-heading">
+                <h2>
+                  <Icon name="credit" size={16} className="heading-icon" />
+                  Crédito
+                </h2>
+                <span>Visão mensal</span>
+              </div>
+
+              <div className="summary-grid">
+                <div className="summary-item">
+                  <p>Limite sugerido</p>
+                  <strong>{formatCurrency(creditSuggestedLimit)}</strong>
+                </div>
+                <div className="summary-item">
+                  <p>Uso no mês</p>
+                  <strong className={creditUsageRatio > 1 ? 'negative' : ''}>
+                    {formatCurrency(monthlySummary.expense)}
+                  </strong>
+                </div>
+                <div className="summary-item">
+                  <p>Disponível</p>
+                  <strong className={creditRemaining > 0 ? 'positive' : 'negative'}>
+                    {formatCurrency(creditRemaining)}
+                  </strong>
+                </div>
+                <div className="summary-item">
+                  <p>Uso do limite</p>
+                  <strong className={creditUsageRatio > 1 ? 'negative' : ''}>
+                    {(creditUsageRatio * 100).toFixed(1)}%
+                  </strong>
+                </div>
+              </div>
+
+              <div className="credit-progress-block">
+                <div className="goal-progress-track">
+                  <div
+                    className={`goal-progress-fill ${creditUsageRatio > 1 ? 'over' : creditUsageRatio > 0.85 ? 'near' : 'ok'}`}
+                    style={{ width: `${Math.min(creditUsageRatio * 100, 100)}%` }}
+                  />
+                </div>
+                <small className="section-note">
+                  Baseado nas despesas do mês atual em relação a 30% da sua renda mensal.
+                </small>
+              </div>
+            </article>
+
+            <article className="panel">
+              <div className="panel-heading">
+                <h3>Dicas rápidas</h3>
+              </div>
+              <ul className="goal-alert-list">
+                <li>
+                  <Icon name="check" size={14} />
+                  <span>Pague o total da fatura para evitar juros rotativos.</span>
+                </li>
+                <li>
+                  <Icon name="alert" size={14} />
+                  <span>Mantenha uso abaixo de 30% do limite para mais folga no orçamento.</span>
+                </li>
+                <li>
+                  <Icon name="calendar" size={14} />
+                  <span>Concentre vencimentos próximos da data de maior entrada.</span>
+                </li>
+              </ul>
             </article>
           </section>
         )}
@@ -4905,15 +5181,23 @@ function App() {
       </main>
 
       <nav className="bottom-nav" aria-label="Navegação principal">
-        {TAB_ITEMS.map((tab) => (
+        {PRIMARY_TAB_ITEMS.map((tab) => (
           <button
             type="button"
             key={tab.id}
-            className={`nav-item ${activeTab === tab.id ? 'active' : ''}`}
+            className={`nav-item ${tab.isAction ? 'launch-action' : ''} ${activeTab === tab.id ? 'active' : ''}`}
             onClick={() => setActiveTab(tab.id)}
           >
-            <span className="nav-indicator" aria-hidden="true" />
-            <Icon name={tab.icon} size={18} />
+            {tab.isAction ? (
+              <span className="launch-circle" aria-hidden="true">
+                <Icon name="plus" size={20} />
+              </span>
+            ) : (
+              <>
+                <span className="nav-indicator" aria-hidden="true" />
+                <Icon name={tab.icon} size={18} />
+              </>
+            )}
             <span className="nav-label">{tab.label}</span>
           </button>
         ))}

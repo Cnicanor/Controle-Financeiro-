@@ -86,6 +86,12 @@
   min-width: 0;
 }
 
+.header-actions {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.42rem;
+}
+
 .eyebrow {
   margin: 0;
   color: var(--muted);
@@ -133,6 +139,103 @@
   flex-direction: column;
   gap: 0.2rem;
   z-index: 60;
+}
+
+.secondary-menu {
+  position: relative;
+  margin-top: 0.08rem;
+}
+
+.menu-trigger {
+  width: 2.12rem;
+  height: 2.12rem;
+}
+
+.secondary-menu-panel {
+  position: absolute;
+  top: calc(100% + 0.42rem);
+  right: 0;
+  width: min(86vw, 16rem);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-elevated);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.14);
+  padding: 0.58rem;
+  z-index: 60;
+}
+
+.menu-section-title {
+  margin: 0 0 0.44rem;
+  font-size: 0.71rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 800;
+}
+
+.secondary-menu-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.secondary-menu-link {
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  padding: 0.44rem 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font: inherit;
+  font-size: 0.79rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.secondary-menu-link-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.34rem;
+}
+
+.secondary-menu-link.active {
+  border-color: #78d0c2;
+  background: #e8faf6;
+  color: #0f615f;
+}
+
+.menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0.56rem 0;
+}
+
+.currency-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.34rem;
+}
+
+.currency-selector span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.77rem;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.currency-selector select {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  color: var(--text);
+  padding: 0.56rem 0.62rem;
+  font: inherit;
 }
 
 .theme-option {
@@ -1049,6 +1152,10 @@
   background: var(--track-muted);
 }
 
+.credit-progress-block {
+  margin-top: 0.8rem;
+}
+
 .goal-progress-fill {
   height: 100%;
   border-radius: inherit;
@@ -1159,12 +1266,14 @@
 .mini-button:focus-visible,
 .mini-chip:focus-visible,
 .theme-option:focus-visible,
+.secondary-menu-link:focus-visible,
 .icon-button:focus-visible,
 .launch-form input:focus-visible,
 .launch-form select:focus-visible,
 .launch-form textarea:focus-visible,
 .filter-control input:focus-visible,
 .filter-control select:focus-visible,
+.currency-selector select:focus-visible,
 .nav-item:focus-visible {
   outline: 2px solid #0f766e;
   outline-offset: 2px;
@@ -1175,7 +1284,7 @@
   background: var(--nav-bg);
   backdrop-filter: blur(10px);
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.22rem;
   padding: 0.56rem;
   position: sticky;
@@ -1196,6 +1305,23 @@
   font-weight: 700;
 }
 
+.nav-item.launch-action {
+  padding-top: 0;
+}
+
+.launch-circle {
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ecfffc;
+  background: linear-gradient(135deg, #0f766e, #0ea5a0);
+  box-shadow: 0 10px 18px rgba(15, 118, 110, 0.3);
+  margin-top: -1.05rem;
+}
+
 .nav-label {
   font-size: 0.62rem;
 }
@@ -1213,6 +1339,14 @@
   color: var(--nav-active-text);
 }
 
+.nav-item.launch-action.active {
+  background: transparent;
+}
+
+.nav-item.launch-action.active .launch-circle {
+  filter: brightness(1.06);
+}
+
 .nav-item.active .nav-indicator {
   background: var(--heading-accent);
   transform: scale(1.2);
@@ -1223,6 +1357,16 @@ body.dark .theme-selector-menu {
 }
 
 body.dark .theme-option.active {
+  border-color: #2ea79f;
+  background: #123f42;
+  color: #d8fff8;
+}
+
+body.dark .secondary-menu-panel {
+  box-shadow: 0 14px 28px rgba(2, 6, 23, 0.55);
+}
+
+body.dark .secondary-menu-link.active {
   border-color: #2ea79f;
   background: #123f42;
   color: #d8fff8;
