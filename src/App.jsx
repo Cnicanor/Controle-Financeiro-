@@ -5,6 +5,7 @@ const PRIMARY_TAB_ITEMS = [
   { id: 'home', icon: 'home' },
   { id: 'launch', icon: 'plus', isAction: true },
   { id: 'credit', icon: 'credit' },
+  { id: 'menu', icon: 'menu', isMenu: true },
 ]
 
 const SECONDARY_MENU_ITEMS = [
@@ -17,6 +18,14 @@ const CATEGORY_OPTIONS = {
   receita: ['Salário', 'Freelance', 'Investimentos', 'Outros'],
   despesa: ['Moradia', 'Alimentação', 'Transporte', 'Pet', 'Saúde', 'Lazer', 'Contas', 'Outros'],
 }
+const PAYMENT_METHOD_OPTIONS = Object.freeze([
+  { value: 'pix', label: 'Pix' },
+  { value: 'dinheiro', label: 'Dinheiro' },
+  { value: 'debito', label: 'Débito' },
+  { value: 'credito', label: 'Crédito' },
+])
+const CASH_PAYMENT_METHODS = new Set(['pix', 'dinheiro', 'debito'])
+const MAX_CREDIT_CARDS = 5
 const SUBCATEGORY_OPTIONS = Object.freeze({
   Transporte: ['Financiamento', 'Combustível', 'Estacionamento', 'Pedágio'],
   Pet: ['Ração', 'Banho e tosa', 'Vacina'],
@@ -55,6 +64,7 @@ const STORAGE_KEYS = Object.freeze({
   entries: 'controle_financeiro_entries_v2',
   legacyEntries: 'controle_financeiro_entries_v1',
   goals: 'controle_financeiro_goals_v1',
+  creditCards: 'controle_financeiro_credit_cards_v1',
   recurringRun: 'controle_financeiro_recurring_last_month',
   investmentAssets: 'controle_financeiro_investment_assets_v1',
   investmentMovements: 'controle_financeiro_investment_movements_v1',
@@ -67,6 +77,7 @@ const STORAGE_KEYS = Object.freeze({
 const STORAGE_ENTRIES_KEY = STORAGE_KEYS.entries
 const LEGACY_STORAGE_ENTRIES_KEY = STORAGE_KEYS.legacyEntries
 const STORAGE_GOALS_KEY = STORAGE_KEYS.goals
+const STORAGE_CREDIT_CARDS_KEY = STORAGE_KEYS.creditCards
 const STORAGE_RECURRING_RUN_KEY = STORAGE_KEYS.recurringRun
 const STORAGE_INVESTMENT_ASSETS_KEY = STORAGE_KEYS.investmentAssets
 const STORAGE_INVESTMENT_MOVEMENTS_KEY = STORAGE_KEYS.investmentMovements
@@ -112,6 +123,7 @@ const UI_TEXT = Object.freeze({
     'nav.home': 'Início',
     'nav.launch': 'Lançar',
     'nav.credit': 'Crédito',
+    'nav.menu': 'Menu',
     'menu.open': 'Abrir menu',
     'menu.section': 'Áreas secundárias',
     'menu.investments': 'Investimentos',
@@ -162,6 +174,7 @@ const UI_TEXT = Object.freeze({
     'nav.home': 'Início',
     'nav.launch': 'Lançar',
     'nav.credit': 'Crédito',
+    'nav.menu': 'Menu',
     'menu.open': 'Abrir menu',
     'menu.section': 'Áreas secundárias',
     'menu.investments': 'Investimentos',
@@ -212,6 +225,7 @@ const UI_TEXT = Object.freeze({
     'nav.home': 'Home',
     'nav.launch': 'Add',
     'nav.credit': 'Credit',
+    'nav.menu': 'Menu',
     'menu.open': 'Open menu',
     'menu.section': 'Secondary areas',
     'menu.investments': 'Investments',
@@ -307,6 +321,10 @@ function createEntryId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
 }
 
+function createCreditCardId() {
+  return `card-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
+}
+
 function createRecurringTemplateId() {
   return `rec-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
 }
@@ -375,6 +393,33 @@ function getSubcategoryOptions(category) {
   return SUBCATEGORY_OPTIONS[category] ?? []
 }
 
+function normalizeEntryPaymentMethod(rawPaymentMethod, type = 'despesa') {
+  if (type !== 'despesa') {
+    return null
+  }
+
+  return PAYMENT_METHOD_OPTIONS.some((option) => option.value === rawPaymentMethod)
+    ? rawPaymentMethod
+    : 'debito'
+}
+
+function normalizeEntryCreditCardId(rawCreditCardId, paymentMethod) {
+  if (paymentMethod !== 'credito') {
+    return null
+  }
+
+  return typeof rawCreditCardId === 'string' ? rawCreditCardId.trim() : ''
+}
+
+function resolveSelectedCreditCardId(rawCreditCardId, cardsById, cards = []) {
+  const normalizedId = typeof rawCreditCardId === 'string' ? rawCreditCardId.trim() : ''
+  if (normalizedId && cardsById.has(normalizedId)) {
+    return normalizedId
+  }
+
+  return cards[0]?.id ?? ''
+}
+
 function normalizeEntrySubcategory(
   rawSubcategory,
   category,
@@ -414,12 +459,18 @@ function getEntryCategoryLabel(entry) {
   return subcategory ? `${category} > ${subcategory}` : category
 }
 
-function getInitialForm(type = 'despesa') {
+function getInitialForm(type = 'despesa', creditCards = []) {
+  const paymentMethod = type === 'despesa' ? 'debito' : ''
   return {
     type,
     value: '',
     category: CATEGORY_OPTIONS[type][0],
     subcategory: '',
+    paymentMethod,
+    creditCardId:
+      type === 'despesa' && paymentMethod === 'credito'
+        ? creditCards[0]?.id ?? ''
+        : '',
     date: getInputDate(),
     description: '',
     recurrence: 'none',
@@ -489,6 +540,8 @@ function sanitizeStoredEntry(rawEntry) {
   )
   const date = typeof rawEntry.date === 'string' ? rawEntry.date : ''
   const description = typeof rawEntry.description === 'string' ? rawEntry.description.trim() : ''
+  const paymentMethod = normalizeEntryPaymentMethod(rawEntry.paymentMethod, type)
+  const creditCardId = normalizeEntryCreditCardId(rawEntry.creditCardId, paymentMethod)
 
   const rawRecurrence = rawEntry.recurrence
   const recurrence = rawRecurrence === 'monthly' ? 'monthly' : 'none'
@@ -514,6 +567,8 @@ function sanitizeStoredEntry(rawEntry) {
     subcategory,
     date,
     description,
+    paymentMethod,
+    creditCardId,
     recurrence,
     recurrenceTemplateId,
   }
@@ -540,6 +595,53 @@ function sanitizeGoals(rawGoals) {
   }
 
   return sanitizedGoals
+}
+
+function sanitizeCreditCard(rawCard) {
+  if (!rawCard || typeof rawCard !== 'object') {
+    return null
+  }
+
+  const name = typeof rawCard.name === 'string' ? rawCard.name.trim() : ''
+  const limit = parseAmount(rawCard.limit)
+
+  if (!name || !Number.isFinite(limit) || limit <= 0) {
+    return null
+  }
+
+  return {
+    id:
+      typeof rawCard.id === 'string' && rawCard.id.trim()
+        ? rawCard.id.trim()
+        : createCreditCardId(),
+    name,
+    limit,
+  }
+}
+
+function sanitizeCreditCards(rawCards) {
+  if (!Array.isArray(rawCards)) {
+    return []
+  }
+
+  const seenIds = new Set()
+  const sanitizedCards = []
+
+  for (const rawCard of rawCards) {
+    const sanitizedCard = sanitizeCreditCard(rawCard)
+    if (!sanitizedCard || seenIds.has(sanitizedCard.id)) {
+      continue
+    }
+
+    seenIds.add(sanitizedCard.id)
+    sanitizedCards.push(sanitizedCard)
+
+    if (sanitizedCards.length >= MAX_CREDIT_CARDS) {
+      break
+    }
+  }
+
+  return sanitizedCards
 }
 
 function createDefaultCashAsset() {
@@ -801,6 +903,35 @@ function saveGoalsToStorage(goals) {
 
   try {
     window.localStorage.setItem(STORAGE_GOALS_KEY, JSON.stringify(goals))
+  } catch {
+    // armazenamento local indisponível; segue em memória
+  }
+}
+
+function loadCreditCardsFromStorage() {
+  if (typeof window === 'undefined') {
+    return []
+  }
+
+  try {
+    const rawStorage = window.localStorage.getItem(STORAGE_CREDIT_CARDS_KEY)
+    if (!rawStorage) {
+      return []
+    }
+
+    return sanitizeCreditCards(JSON.parse(rawStorage))
+  } catch {
+    return []
+  }
+}
+
+function saveCreditCardsToStorage(cards) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(STORAGE_CREDIT_CARDS_KEY, JSON.stringify(cards))
   } catch {
     // armazenamento local indisponível; segue em memória
   }
@@ -1146,15 +1277,20 @@ function getRecurringTemplateMap(entries) {
 function buildRecurringSummaries(entries) {
   const templateMap = getRecurringTemplateMap(entries)
 
-  return Array.from(templateMap.values()).map((entry) => ({
-    templateId: entry.recurrenceTemplateId,
-    type: entry.type,
-    value: entry.value,
-    category: entry.category,
-    subcategory: entry.subcategory ?? '',
-    description: entry.description,
-    dayOfMonth: Number(entry.date.slice(8, 10)),
-  }))
+  return Array.from(templateMap.values()).map((entry) => {
+    const paymentMethod = normalizeEntryPaymentMethod(entry.paymentMethod, entry.type)
+    return {
+      templateId: entry.recurrenceTemplateId,
+      type: entry.type,
+      value: entry.value,
+      category: entry.category,
+      subcategory: entry.subcategory ?? '',
+      paymentMethod,
+      creditCardId: normalizeEntryCreditCardId(entry.creditCardId, paymentMethod),
+      description: entry.description,
+      dayOfMonth: Number(entry.date.slice(8, 10)),
+    }
+  })
 }
 
 function hasRecurringEntryInMonth(entries, templateId, monthKey) {
@@ -1171,6 +1307,7 @@ function buildRecurringEntryForMonth(templateEntry, monthKey) {
   const templateDay = Number(templateEntry.date.slice(8, 10))
   const day = Math.min(templateDay, getLastDayOfMonth(year, month))
   const nextDate = `${year}-${padNumber(month)}-${padNumber(day)}`
+  const paymentMethod = normalizeEntryPaymentMethod(templateEntry.paymentMethod, templateEntry.type)
 
   return {
     id: createEntryId(),
@@ -1178,6 +1315,8 @@ function buildRecurringEntryForMonth(templateEntry, monthKey) {
     value: templateEntry.value,
     category: templateEntry.category,
     subcategory: templateEntry.subcategory ?? '',
+    paymentMethod,
+    creditCardId: normalizeEntryCreditCardId(templateEntry.creditCardId, paymentMethod),
     date: nextDate,
     description: templateEntry.description,
     recurrence: 'monthly',
@@ -1515,7 +1654,7 @@ function normalizeSearchText(value) {
     .trim()
 }
 
-function validateFormData(formData) {
+function validateFormData(formData, creditCardsById = new Map()) {
   const errors = {}
 
   if (formData.type !== 'receita' && formData.type !== 'despesa') {
@@ -1566,6 +1705,21 @@ function validateFormData(formData) {
     errors.recurrence = 'Escolha uma recorrência válida.'
   }
 
+  const paymentMethod = normalizeEntryPaymentMethod(formData.paymentMethod, formData.type)
+  const creditCardId = normalizeEntryCreditCardId(formData.creditCardId, paymentMethod)
+
+  if (formData.type === 'despesa' && !paymentMethod) {
+    errors.paymentMethod = 'Escolha uma forma de pagamento válida.'
+  }
+
+  if (paymentMethod === 'credito') {
+    if (!creditCardId) {
+      errors.creditCardId = 'Selecione um cartão de crédito.'
+    } else if (creditCardsById.size > 0 && !creditCardsById.has(creditCardId)) {
+      errors.creditCardId = 'Selecione um cartão de crédito válido.'
+    }
+  }
+
   return {
     errors,
     normalizedData: {
@@ -1575,7 +1729,35 @@ function validateFormData(formData) {
       subcategory,
       date,
       description,
+      paymentMethod,
+      creditCardId,
       recurrence: formData.recurrence,
+    },
+  }
+}
+
+function validateCreditCardForm(formData) {
+  const errors = {}
+  const name = typeof formData.name === 'string' ? formData.name.trim() : ''
+  const limit = parseAmount(formData.limit)
+
+  if (!name) {
+    errors.name = 'Informe o nome do cartão.'
+  } else if (name.length > 40) {
+    errors.name = 'Nome com até 40 caracteres.'
+  }
+
+  if (String(formData.limit ?? '').trim() === '') {
+    errors.limit = 'Informe o limite do cartão.'
+  } else if (!Number.isFinite(limit) || limit <= 0) {
+    errors.limit = 'Use um limite maior que zero.'
+  }
+
+  return {
+    errors,
+    normalizedData: {
+      name,
+      limit,
     },
   }
 }
@@ -1753,6 +1935,10 @@ function validateBackupPayload(payload) {
     return { isValid: false, error: 'Arquivo inválido: metas devem estar em formato de objeto.' }
   }
 
+  if (payload.creditCards !== undefined && !Array.isArray(payload.creditCards)) {
+    return { isValid: false, error: 'Arquivo inválido: cartões devem estar em formato de lista.' }
+  }
+
   if (payload.recurrences !== undefined && !Array.isArray(payload.recurrences)) {
     return { isValid: false, error: 'Arquivo inválido: recorrências devem estar em formato de lista.' }
   }
@@ -1787,12 +1973,14 @@ function validateBackupPayload(payload) {
     rawInvestmentJournal,
     sanitizedInvestmentAssets,
   )
+  const sanitizedCreditCards = sanitizeCreditCards(payload.creditCards ?? [])
 
   return {
     isValid: true,
     data: {
       entries: sanitizedEntries,
       goals: sanitizeGoals(payload.goals ?? {}),
+      creditCards: sanitizedCreditCards,
       recurrences:
         Array.isArray(payload.recurrences) && payload.recurrences.length > 0
           ? payload.recurrences
@@ -1824,6 +2012,18 @@ function getTypeLabel(type) {
   return type === 'receita' ? 'Receita' : 'Despesa'
 }
 
+function getPaymentMethodLabel(paymentMethod) {
+  return PAYMENT_METHOD_OPTIONS.find((option) => option.value === paymentMethod)?.label ?? ''
+}
+
+function isCreditExpenseEntry(entry) {
+  return entry.type === 'despesa' && entry.paymentMethod === 'credito'
+}
+
+function isCashExpenseEntry(entry) {
+  return entry.type === 'despesa' && CASH_PAYMENT_METHODS.has(entry.paymentMethod)
+}
+
 function getGoalStatus(ratio) {
   if (ratio >= 1) {
     return 'over'
@@ -1839,6 +2039,7 @@ function getGoalStatus(ratio) {
 function getBootSnapshot(defaultEntries) {
   const loadedEntries = loadEntriesFromStorage(defaultEntries)
   const loadedGoals = loadGoalsFromStorage()
+  const loadedCreditCards = loadCreditCardsFromStorage()
   const loadedInvestmentAssets = ensureCashAsset(loadInvestmentAssetsFromStorage())
   const loadedInvestmentMovements = loadInvestmentMovementsFromStorage(loadedInvestmentAssets)
   const loadedInvestmentJournal = loadInvestmentJournalFromStorage(loadedInvestmentAssets)
@@ -1849,6 +2050,7 @@ function getBootSnapshot(defaultEntries) {
     return {
       entries: loadedEntries,
       goals: loadedGoals,
+      creditCards: loadedCreditCards,
       investmentAssets: loadedInvestmentAssets,
       investmentMovements: loadedInvestmentMovements,
       investmentJournal: loadedInvestmentJournal,
@@ -1862,6 +2064,7 @@ function getBootSnapshot(defaultEntries) {
   return {
     entries: generatedEntries.length > 0 ? [...generatedEntries, ...loadedEntries] : loadedEntries,
     goals: loadedGoals,
+    creditCards: loadedCreditCards,
     investmentAssets: loadedInvestmentAssets,
     investmentMovements: loadedInvestmentMovements,
     investmentJournal: loadedInvestmentJournal,
@@ -2224,6 +2427,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('home')
   const [entries, setEntries] = useState(() => bootSnapshot.entries)
   const [categoryGoals, setCategoryGoals] = useState(() => bootSnapshot.goals)
+  const [creditCards, setCreditCards] = useState(() => bootSnapshot.creditCards ?? [])
   const [investmentAssets, setInvestmentAssets] = useState(() =>
     ensureCashAsset(bootSnapshot.investmentAssets ?? [createDefaultCashAsset()]),
   )
@@ -2233,9 +2437,14 @@ function App() {
   const [investmentJournal, setInvestmentJournal] = useState(
     () => bootSnapshot.investmentJournal ?? [],
   )
-  const [formData, setFormData] = useState(getInitialForm())
+  const [formData, setFormData] = useState(() =>
+    getInitialForm('despesa', bootSnapshot.creditCards ?? []),
+  )
   const [formErrors, setFormErrors] = useState({})
   const [editingEntryId, setEditingEntryId] = useState(null)
+  const [creditCardForm, setCreditCardForm] = useState({ name: '', limit: '' })
+  const [creditCardErrors, setCreditCardErrors] = useState({})
+  const [editingCreditCardId, setEditingCreditCardId] = useState(null)
   const [historyFilters, setHistoryFilters] = useState({
     type: 'todos',
     category: 'todas',
@@ -2288,6 +2497,7 @@ function App() {
   const secondaryMenuRef = useRef(null)
   const deferredInstallPromptRef = useRef(null)
   const isEditingInvestmentAsset = editingInvestmentAssetId !== null
+  const isEditingCreditCard = editingCreditCardId !== null
   const isEditing = editingEntryId !== null
   const activeLanguageCode = normalizeLanguageCode(languageCode)
   const t = useMemo(() => createTranslate(activeLanguageCode), [activeLanguageCode])
@@ -2405,7 +2615,17 @@ function App() {
   const totalBalance = useMemo(
     () =>
       entries.reduce(
-        (total, entry) => total + (entry.type === 'receita' ? entry.value : -entry.value),
+        (total, entry) => {
+          if (entry.type === 'receita') {
+            return total + entry.value
+          }
+
+          if (isCashExpenseEntry(entry)) {
+            return total - entry.value
+          }
+
+          return total
+        },
         0,
       ),
     [entries],
@@ -2417,25 +2637,21 @@ function App() {
         (acc, entry) => {
           if (entry.type === 'receita') {
             acc.income += entry.value
-          } else {
+          } else if (isCashExpenseEntry(entry)) {
             acc.expense += entry.value
+          } else if (isCreditExpenseEntry(entry)) {
+            acc.creditExpense += entry.value
           }
 
           return acc
         },
-        { income: 0, expense: 0 },
+        { income: 0, expense: 0, creditExpense: 0 },
       ),
     [monthlyEntries],
   )
 
   const monthlyBalance = monthlySummary.income - monthlySummary.expense
   const savingsRate = monthlySummary.income > 0 ? (monthlyBalance / monthlySummary.income) * 100 : 0
-  const creditSuggestedLimit = monthlySummary.income > 0 ? monthlySummary.income * 0.3 : 0
-  const creditUsageRatio =
-    creditSuggestedLimit > 0
-      ? Math.min(monthlySummary.expense / creditSuggestedLimit, 1.4)
-      : 0
-  const creditRemaining = Math.max(creditSuggestedLimit - monthlySummary.expense, 0)
 
   const monthlyExpenseTotals = useMemo(() => {
     const totals = new Map()
@@ -2675,6 +2891,76 @@ function App() {
       ? investmentJournalForm.assetId
       : ''
 
+  const creditCardsById = useMemo(
+    () => new Map(creditCards.map((card) => [card.id, card])),
+    [creditCards],
+  )
+
+  const activeEditingCreditCard = useMemo(
+    () => creditCards.find((card) => card.id === editingCreditCardId) ?? null,
+    [creditCards, editingCreditCardId],
+  )
+
+  const creditCardsLimitReached = creditCards.length >= MAX_CREDIT_CARDS && !isEditingCreditCard
+
+  const creditExpenseEntries = useMemo(
+    () => orderedEntries.filter((entry) => isCreditExpenseEntry(entry)),
+    [orderedEntries],
+  )
+
+  const monthlyCreditExpense = monthlySummary.creditExpense
+
+  const creditCardSummaries = useMemo(
+    () =>
+      creditCards.map((card) => {
+        const expenses = creditExpenseEntries.filter((entry) => entry.creditCardId === card.id)
+        const totalSpent = expenses.reduce((total, entry) => total + entry.value, 0)
+        const monthlySpent = expenses
+          .filter((entry) => isInCurrentMonth(entry.date))
+          .reduce((total, entry) => total + entry.value, 0)
+        const available = card.limit - totalSpent
+        const usageRatio = card.limit > 0 ? totalSpent / card.limit : 0
+
+        return {
+          ...card,
+          expenses,
+          totalSpent,
+          monthlySpent,
+          available,
+          usageRatio,
+          overLimit: Math.max(totalSpent - card.limit, 0),
+        }
+      }),
+    [creditCards, creditExpenseEntries],
+  )
+
+  const creditCardsTotals = useMemo(
+    () =>
+      creditCardSummaries.reduce(
+        (acc, card) => {
+          acc.limit += card.limit
+          acc.spent += card.totalSpent
+          acc.available += card.available
+          return acc
+        },
+        { limit: 0, spent: 0, available: 0 },
+      ),
+    [creditCardSummaries],
+  )
+
+  const creditUsageRatio =
+    creditCardsTotals.limit > 0
+      ? Math.min(creditCardsTotals.spent / creditCardsTotals.limit, 1.4)
+      : 0
+
+  const creditOrphanEntries = useMemo(
+    () =>
+      creditExpenseEntries.filter(
+        (entry) => !entry.creditCardId || !creditCardsById.has(entry.creditCardId),
+      ),
+    [creditExpenseEntries, creditCardsById],
+  )
+
   const historyCategoryOptions = useMemo(() => {
     const categories = new Set()
 
@@ -2724,8 +3010,12 @@ function App() {
       const matchesSubcategory =
         activeHistorySubcategory === 'todas' ||
         entry.subcategory === activeHistorySubcategory
+      const linkedCardName =
+        entry.type === 'despesa' && entry.paymentMethod === 'credito'
+          ? creditCardsById.get(entry.creditCardId ?? '')?.name ?? ''
+          : ''
       const searchBase = normalizeSearchText(
-        `${entry.category} ${entry.subcategory ?? ''} ${getEntryCategoryLabel(entry)} ${entry.description} ${entry.date} ${entry.value} ${getTypeLabel(entry.type)}`,
+        `${entry.category} ${entry.subcategory ?? ''} ${getEntryCategoryLabel(entry)} ${entry.description} ${entry.date} ${entry.value} ${getTypeLabel(entry.type)} ${getPaymentMethodLabel(entry.paymentMethod)} ${linkedCardName}`,
       )
       const matchesSearch =
         !normalizedGlobalSearchQuery ||
@@ -2738,6 +3028,7 @@ function App() {
     historyFilters.type,
     activeHistoryCategory,
     activeHistorySubcategory,
+    creditCardsById,
     normalizedGlobalSearchQuery,
   ])
 
@@ -2758,12 +3049,39 @@ function App() {
     : ''
 
   useEffect(() => {
+    setFormData((previous) => {
+      if (previous.type !== 'despesa' || previous.paymentMethod !== 'credito') {
+        return previous
+      }
+
+      const selectedCreditCardId = resolveSelectedCreditCardId(
+        previous.creditCardId,
+        creditCardsById,
+        creditCards,
+      )
+
+      if (selectedCreditCardId === previous.creditCardId) {
+        return previous
+      }
+
+      return {
+        ...previous,
+        creditCardId: selectedCreditCardId,
+      }
+    })
+  }, [creditCards, creditCardsById])
+
+  useEffect(() => {
     saveEntriesToStorage(entries)
   }, [entries])
 
   useEffect(() => {
     saveGoalsToStorage(categoryGoals)
   }, [categoryGoals])
+
+  useEffect(() => {
+    saveCreditCardsToStorage(creditCards)
+  }, [creditCards])
 
   useEffect(() => {
     saveInvestmentAssetsToStorage(investmentAssetsSafe)
@@ -3018,8 +3336,8 @@ function App() {
     setSecondaryMenuSection('main')
   }
 
-  const resetLaunchForm = (type = 'despesa') => {
-    setFormData(getInitialForm(type))
+  const resetLaunchForm = (type = 'despesa', cardsOverride = creditCards) => {
+    setFormData(getInitialForm(type, cardsOverride))
     setFormErrors({})
     setEditingEntryId(null)
   }
@@ -3036,11 +3354,26 @@ function App() {
           suggestedEntryForType?.category === suggestedCategoryForType
             ? suggestedEntryForType?.subcategory ?? ''
             : ''
+        const suggestedPaymentMethodForType =
+          value === 'despesa'
+            ? normalizeEntryPaymentMethod(suggestedEntryForType?.paymentMethod, value)
+            : ''
+        const suggestedCreditCardIdForType =
+          value === 'despesa' && suggestedPaymentMethodForType === 'credito'
+            ? resolveSelectedCreditCardId(
+                suggestedEntryForType?.creditCardId,
+                creditCardsById,
+                creditCards,
+              )
+            : ''
+
         return {
           ...previous,
           type: value,
           category: suggestedCategoryForType,
           subcategory: suggestedSubcategoryForType,
+          paymentMethod: suggestedPaymentMethodForType,
+          creditCardId: suggestedCreditCardIdForType,
         }
       }
 
@@ -3057,6 +3390,18 @@ function App() {
           ...previous,
           category: value,
           subcategory: '',
+        }
+      }
+
+      if (name === 'paymentMethod') {
+        const nextPaymentMethod = normalizeEntryPaymentMethod(value, previous.type)
+        return {
+          ...previous,
+          paymentMethod: nextPaymentMethod,
+          creditCardId:
+            nextPaymentMethod === 'credito'
+              ? resolveSelectedCreditCardId(previous.creditCardId, creditCardsById, creditCards)
+              : '',
         }
       }
 
@@ -3077,10 +3422,16 @@ function App() {
       if (name === 'type') {
         delete nextErrors.category
         delete nextErrors.subcategory
+        delete nextErrors.paymentMethod
+        delete nextErrors.creditCardId
       }
 
       if (name === 'category') {
         delete nextErrors.subcategory
+      }
+
+      if (name === 'paymentMethod') {
+        delete nextErrors.creditCardId
       }
 
       return nextErrors
@@ -3090,6 +3441,7 @@ function App() {
   const applyLaunchSuggestion = ({
     includeValue = false,
     includeCategory = false,
+    includePayment = false,
     includeDescription = false,
     feedback = null,
   } = {}) => {
@@ -3111,6 +3463,22 @@ function App() {
       if (includeCategory && suggestedLaunchCategory) {
         nextData.category = suggestedLaunchCategory
         nextData.subcategory = suggestedLaunchSubcategory
+      }
+
+      if (includePayment && previous.type === 'despesa') {
+        const nextPaymentMethod = normalizeEntryPaymentMethod(
+          suggestedLaunchEntry.paymentMethod,
+          'despesa',
+        )
+        nextData.paymentMethod = nextPaymentMethod
+        nextData.creditCardId =
+          nextPaymentMethod === 'credito'
+            ? resolveSelectedCreditCardId(
+                suggestedLaunchEntry.creditCardId,
+                creditCardsById,
+                creditCards,
+              )
+            : ''
       }
 
       if (
@@ -3136,6 +3504,10 @@ function App() {
       if (includeCategory) {
         delete nextErrors.category
         delete nextErrors.subcategory
+      }
+      if (includePayment) {
+        delete nextErrors.paymentMethod
+        delete nextErrors.creditCardId
       }
       if (includeDescription) {
         delete nextErrors.description
@@ -3213,7 +3585,7 @@ function App() {
   const handleSubmit = (event) => {
     event.preventDefault()
 
-    const { errors, normalizedData } = validateFormData(formData)
+    const { errors, normalizedData } = validateFormData(formData, creditCardsById)
     if (Object.keys(errors).length > 0) {
       setFormErrors(errors)
       showToast('error', 'Revise os campos obrigatórios para salvar.')
@@ -3263,12 +3635,20 @@ function App() {
   }
 
   const handleStartEdit = (entry) => {
+    const paymentMethod = normalizeEntryPaymentMethod(entry.paymentMethod, entry.type)
+    const selectedCreditCardId =
+      entry.type === 'despesa' && paymentMethod === 'credito'
+        ? resolveSelectedCreditCardId(entry.creditCardId, creditCardsById, creditCards)
+        : ''
+
     setEditingEntryId(entry.id)
     setFormData({
       type: entry.type,
       value: String(entry.value),
       category: entry.category,
       subcategory: entry.subcategory ?? '',
+      paymentMethod: paymentMethod ?? '',
+      creditCardId: selectedCreditCardId,
       date: entry.date,
       description: entry.description,
       recurrence: entry.recurrence,
@@ -3295,10 +3675,13 @@ function App() {
   }
 
   const handleDuplicateEntry = (entry) => {
+    const paymentMethod = normalizeEntryPaymentMethod(entry.paymentMethod, entry.type)
     const duplicatedEntry = {
       ...entry,
       id: createEntryId(),
       date: getInputDate(),
+      paymentMethod,
+      creditCardId: normalizeEntryCreditCardId(entry.creditCardId, paymentMethod),
       recurrence: 'none',
       recurrenceTemplateId: null,
     }
@@ -3392,6 +3775,85 @@ function App() {
       return next
     })
     showToast('success', `Meta de ${category} removida.`)
+  }
+
+  const resetCreditCardForm = () => {
+    setCreditCardForm({ name: '', limit: '' })
+    setCreditCardErrors({})
+    setEditingCreditCardId(null)
+  }
+
+  const handleCreditCardChange = (event) => {
+    const { name, value } = event.target
+    setCreditCardForm((previous) => ({ ...previous, [name]: value }))
+
+    setCreditCardErrors((previous) => {
+      if (!previous[name]) {
+        return previous
+      }
+
+      const nextErrors = { ...previous }
+      delete nextErrors[name]
+      return nextErrors
+    })
+  }
+
+  const handleSaveCreditCard = (event) => {
+    event.preventDefault()
+
+    if (creditCardsLimitReached) {
+      showToast('error', `Você atingiu o limite de ${MAX_CREDIT_CARDS} cartões.`)
+      return
+    }
+
+    const { errors, normalizedData } = validateCreditCardForm(creditCardForm)
+    if (Object.keys(errors).length > 0) {
+      setCreditCardErrors(errors)
+      showToast('error', 'Revise os dados do cartão antes de salvar.')
+      return
+    }
+
+    const duplicatedName = creditCards.some(
+      (card) =>
+        card.name.toLowerCase() === normalizedData.name.toLowerCase() &&
+        card.id !== editingCreditCardId,
+    )
+    if (duplicatedName) {
+      setCreditCardErrors({ name: 'Já existe um cartão com esse nome.' })
+      showToast('error', 'Nome de cartão já cadastrado.')
+      return
+    }
+
+    if (isEditingCreditCard && activeEditingCreditCard) {
+      setCreditCards((previous) =>
+        previous.map((card) =>
+          card.id === editingCreditCardId ? { ...card, ...normalizedData } : card,
+        ),
+      )
+      resetCreditCardForm()
+      showToast('success', 'Cartão atualizado com sucesso.')
+      return
+    }
+
+    setCreditCards((previous) => [
+      ...previous,
+      { id: createCreditCardId(), ...normalizedData },
+    ])
+    resetCreditCardForm()
+    showToast('success', 'Cartão cadastrado com sucesso.')
+  }
+
+  const handleStartEditCreditCard = (card) => {
+    setEditingCreditCardId(card.id)
+    setCreditCardForm({
+      name: card.name,
+      limit: String(card.limit),
+    })
+    setCreditCardErrors({})
+  }
+
+  const handleCancelEditCreditCard = () => {
+    resetCreditCardForm()
   }
 
   const resetInvestmentAssetForm = (assetType = INVESTMENT_ASSET_TYPES[1]) => {
@@ -3644,6 +4106,7 @@ function App() {
         exportedAt: new Date().toISOString(),
         entries,
         goals: categoryGoals,
+        creditCards,
         recurrences: recurringSummaries,
         investments: {
           assets: investmentAssetsSafe,
@@ -3686,6 +4149,7 @@ function App() {
         summary: {
           entriesCount: validation.data.entries.length,
           goalsCount: Object.keys(validation.data.goals).length,
+          creditCardsCount: validation.data.creditCards.length,
           recurringCount: validation.data.recurrences.length,
           investmentAssetsCount: validation.data.investments.assets.length,
           investmentMovementsCount: validation.data.investments.movements.length,
@@ -3707,11 +4171,13 @@ function App() {
 
     setEntries(pendingImport.data.entries)
     setCategoryGoals(pendingImport.data.goals)
+    setCreditCards(pendingImport.data.creditCards)
     setInvestmentAssets(ensureCashAsset(pendingImport.data.investments.assets))
     setInvestmentMovements(pendingImport.data.investments.movements)
     setInvestmentJournal(pendingImport.data.investments.journal)
     setPendingImport(null)
-    resetLaunchForm()
+    resetLaunchForm('despesa', pendingImport.data.creditCards)
+    resetCreditCardForm()
     resetInvestmentAssetForm()
     resetInvestmentMovementForm()
     resetInvestmentJournalForm()
@@ -3751,122 +4217,6 @@ function App() {
                   month: 'long',
                 })}
               </p>
-            </div>
-
-            <div className="header-actions">
-              <div className="secondary-menu" ref={secondaryMenuRef}>
-                <button
-                  className="icon-button menu-trigger"
-                  type="button"
-                  onClick={handleToggleSecondaryMenu}
-                  aria-label={t('menu.open')}
-                  aria-haspopup="menu"
-                  aria-expanded={isSecondaryMenuOpen}
-                >
-                  <Icon name="menu" size={16} />
-                </button>
-
-                {isSecondaryMenuOpen && (
-                  <div className="secondary-menu-panel" role="menu" aria-label={t('menu.section')}>
-                    {secondaryMenuSection === 'main' ? (
-                      <>
-                        <p className="menu-section-title">{t('menu.section')}</p>
-                        <div className="secondary-menu-links">
-                          {SECONDARY_MENU_ITEMS.map((item) => (
-                            <button
-                              key={item.id}
-                              type="button"
-                              className={`secondary-menu-link ${activeTab === item.id ? 'active' : ''}`}
-                              onClick={() => handleNavigateFromMenu(item.id)}
-                            >
-                              <span className="secondary-menu-link-main">
-                                <Icon name={item.icon} size={15} />
-                                {t(`menu.${item.id}`)}
-                              </span>
-                              <Icon name="chevron-right" size={14} />
-                            </button>
-                          ))}
-                          <button
-                            type="button"
-                            className={`secondary-menu-link ${secondaryMenuSection === 'settings' ? 'active' : ''}`}
-                            onClick={handleOpenSettingsSection}
-                          >
-                            <span className="secondary-menu-link-main">
-                              <Icon name="settings" size={15} />
-                              {t('menu.settings')}
-                            </span>
-                            <Icon name="chevron-right" size={14} />
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="settings-menu-head">
-                          <button
-                            className="mini-button"
-                            type="button"
-                            onClick={handleBackToMainMenu}
-                          >
-                            <Icon name="chevron-left" size={14} />
-                            {t('menu.settings.back')}
-                          </button>
-                          <strong>{t('menu.settings.title')}</strong>
-                        </div>
-
-                        <div className="settings-controls">
-                          <label className="settings-control">
-                            <span>
-                              <Icon name="reports" size={14} /> {t('settings.language')}
-                            </span>
-                            <select
-                              value={activeLanguageCode}
-                              onChange={(event) => handleSelectLanguage(event.target.value)}
-                            >
-                              {LANGUAGE_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-
-                          <label className="settings-control">
-                            <span>
-                              <Icon name="wallet" size={14} /> {t('settings.currency')}
-                            </span>
-                            <select
-                              value={activeCurrencyCode}
-                              onChange={(event) => handleSelectCurrency(event.target.value)}
-                            >
-                              {CURRENCY_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-
-                          <label className="settings-control">
-                            <span>
-                              <Icon name="system" size={14} /> {t('settings.theme')}
-                            </span>
-                            <select
-                              value={themePreference}
-                              onChange={(event) => handleSelectTheme(event.target.value)}
-                            >
-                              {THEME_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                  {t(option.labelKey)}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
             </div>
           </div>
         </header>
@@ -3970,6 +4320,13 @@ function App() {
               </article>
               <article className="metric-card">
                 <div className="metric-top">
+                  <p>Despesas no crédito</p>
+                  <Icon name="credit" size={16} />
+                </div>
+                <strong>{formatCurrency(monthlyCreditExpense)}</strong>
+              </article>
+              <article className="metric-card">
+                <div className="metric-top">
                   <p>Saldo do mês</p>
                   <Icon name="reports" size={16} />
                 </div>
@@ -4038,6 +4395,21 @@ function App() {
                             <span className="tag-pill recurring">
                               <Icon name="repeat" size={12} />
                               Mensal
+                            </span>
+                          )}
+                          {entry.type === 'despesa' && entry.paymentMethod && (
+                            <span className="tag-pill payment-method">
+                              <Icon
+                                name={entry.paymentMethod === 'credito' ? 'credit' : 'wallet'}
+                                size={12}
+                              />
+                              {getPaymentMethodLabel(entry.paymentMethod)}
+                            </span>
+                          )}
+                          {entry.type === 'despesa' && entry.paymentMethod === 'credito' && (
+                            <span className="tag-pill credit-card">
+                              <Icon name="credit" size={12} />
+                              {creditCardsById.get(entry.creditCardId ?? '')?.name ?? 'Sem cartão'}
                             </span>
                           )}
                         </div>
@@ -4157,6 +4529,7 @@ function App() {
                           applyLaunchSuggestion({
                             includeValue: true,
                             includeCategory: true,
+                            includePayment: true,
                             includeDescription: true,
                             feedback: 'Sugestão completa aplicada.',
                           })
@@ -4243,6 +4616,76 @@ function App() {
                     </select>
                     {formErrors.subcategory && <p className="form-error">{formErrors.subcategory}</p>}
                   </label>
+                )}
+
+                {formData.type === 'despesa' && (
+                  <>
+                    <label>
+                      <span className="field-label">
+                        <Icon name="wallet" size={14} /> Forma de pagamento
+                      </span>
+                      <select
+                        className={formErrors.paymentMethod ? 'input-error' : ''}
+                        name="paymentMethod"
+                        value={formData.paymentMethod}
+                        onChange={handleFormChange}
+                      >
+                        {PAYMENT_METHOD_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      {formErrors.paymentMethod && (
+                        <p className="form-error">{formErrors.paymentMethod}</p>
+                      )}
+                    </label>
+
+                    {formData.paymentMethod === 'credito' &&
+                      (creditCards.length === 0 ? (
+                        <div className="warning-box inline-warning-box">
+                          <div className="warning-head">
+                            <Icon name="alert" size={14} />
+                            <strong>Nenhum cartão cadastrado</strong>
+                          </div>
+                          <p>
+                            Para lançar no crédito, cadastre um cartão na aba <strong>Crédito</strong>.
+                          </p>
+                          <button
+                            className="ghost-button"
+                            type="button"
+                            onClick={() => setActiveTab('credit')}
+                          >
+                            Ir para Crédito
+                          </button>
+                        </div>
+                      ) : (
+                        <label>
+                          <span className="field-label">
+                            <Icon name="credit" size={14} /> Cartão de crédito
+                          </span>
+                          <select
+                            className={formErrors.creditCardId ? 'input-error' : ''}
+                            name="creditCardId"
+                            value={resolveSelectedCreditCardId(
+                              formData.creditCardId,
+                              creditCardsById,
+                              creditCards,
+                            )}
+                            onChange={handleFormChange}
+                          >
+                            {creditCards.map((card) => (
+                              <option key={card.id} value={card.id}>
+                                {card.name}
+                              </option>
+                            ))}
+                          </select>
+                          {formErrors.creditCardId && (
+                            <p className="form-error">{formErrors.creditCardId}</p>
+                          )}
+                        </label>
+                      ))}
+                  </>
                 )}
 
                 {launchCategoryShortcuts.length > 0 && (
@@ -4339,67 +4782,198 @@ function App() {
               <div className="panel-heading">
                 <h2>
                   <Icon name="credit" size={16} className="heading-icon" />
-                  {t('screen.credit.title')}
+                  Gestão de crédito
                 </h2>
-                <span>{t('screen.credit.subtitle')}</span>
+                <span>{creditCards.length}/{MAX_CREDIT_CARDS} cartões</span>
               </div>
 
               <div className="summary-grid">
                 <div className="summary-item">
-                  <p>{t('screen.credit.suggestedLimit')}</p>
-                  <strong>{formatCurrency(creditSuggestedLimit)}</strong>
+                  <p>Gasto no crédito (mês)</p>
+                  <strong>{formatCurrency(monthlyCreditExpense)}</strong>
                 </div>
                 <div className="summary-item">
-                  <p>{t('screen.credit.usageMonth')}</p>
-                  <strong className={creditUsageRatio > 1 ? 'negative' : ''}>
-                    {formatCurrency(monthlySummary.expense)}
+                  <p>Limite total</p>
+                  <strong>{formatCurrency(creditCardsTotals.limit)}</strong>
+                </div>
+                <div className="summary-item">
+                  <p>Total gasto</p>
+                  <strong className={creditCardsTotals.spent > creditCardsTotals.limit ? 'negative' : ''}>
+                    {formatCurrency(creditCardsTotals.spent)}
                   </strong>
                 </div>
                 <div className="summary-item">
-                  <p>{t('screen.credit.available')}</p>
-                  <strong className={creditRemaining > 0 ? 'positive' : 'negative'}>
-                    {formatCurrency(creditRemaining)}
-                  </strong>
-                </div>
-                <div className="summary-item">
-                  <p>{t('screen.credit.usageLimit')}</p>
-                  <strong className={creditUsageRatio > 1 ? 'negative' : ''}>
-                    {(creditUsageRatio * 100).toFixed(1)}%
+                  <p>Disponível total</p>
+                  <strong className={creditCardsTotals.available >= 0 ? 'positive' : 'negative'}>
+                    {formatCurrency(creditCardsTotals.available)}
                   </strong>
                 </div>
               </div>
 
               <div className="credit-progress-block">
                 <div className="goal-progress-track">
-                <div
+                  <div
                     className={`goal-progress-fill ${creditUsageRatio > 1 ? 'over' : creditUsageRatio > 0.85 ? 'near' : 'ok'}`}
                     style={{ width: `${Math.min(creditUsageRatio * 100, 100)}%` }}
                   />
                 </div>
                 <small className="section-note">
-                  {t('screen.credit.reference')}
+                  Uso consolidado dos cartões: {(creditUsageRatio * 100).toFixed(1)}% do limite total.
                 </small>
               </div>
             </article>
 
             <article className="panel">
               <div className="panel-heading">
-                <h3>{t('screen.credit.tips')}</h3>
+                <h3>
+                  <Icon name="credit" size={16} className="heading-icon" />
+                  Cartões de crédito
+                </h3>
+                <span>{creditCardSummaries.length} cartão(ões)</span>
               </div>
-              <ul className="goal-alert-list">
-                <li>
-                  <Icon name="check" size={14} />
-                  <span>{t('screen.credit.tip1')}</span>
-                </li>
-                <li>
-                  <Icon name="alert" size={14} />
-                  <span>{t('screen.credit.tip2')}</span>
-                </li>
-                <li>
-                  <Icon name="calendar" size={14} />
-                  <span>{t('screen.credit.tip3')}</span>
-                </li>
-              </ul>
+
+              {creditCardsLimitReached && (
+                <div className="warning-box inline-warning-box">
+                  <div className="warning-head">
+                    <Icon name="alert" size={14} />
+                    <strong>Limite de cartões atingido</strong>
+                  </div>
+                  <p>Você já possui {MAX_CREDIT_CARDS} cartões cadastrados.</p>
+                </div>
+              )}
+
+              <form className="goal-form" onSubmit={handleSaveCreditCard}>
+                <label className="filter-control">
+                  <span className="field-label">Nome do cartão</span>
+                  <input
+                    name="name"
+                    value={creditCardForm.name}
+                    onChange={handleCreditCardChange}
+                    className={creditCardErrors.name ? 'input-error' : ''}
+                    placeholder="Ex.: Cartão Principal"
+                  />
+                  {creditCardErrors.name && <p className="form-error">{creditCardErrors.name}</p>}
+                </label>
+
+                <label className="filter-control">
+                  <span className="field-label">Limite</span>
+                  <input
+                    name="limit"
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={creditCardForm.limit}
+                    onChange={handleCreditCardChange}
+                    className={creditCardErrors.limit ? 'input-error' : ''}
+                    placeholder="0,00"
+                  />
+                  {creditCardErrors.limit && <p className="form-error">{creditCardErrors.limit}</p>}
+                </label>
+
+                <div className="form-actions">
+                  <button className="primary-button" type="submit" disabled={creditCardsLimitReached}>
+                    <Icon name="check" size={16} />
+                    {isEditingCreditCard ? 'Atualizar cartão' : 'Cadastrar cartão'}
+                  </button>
+                  {isEditingCreditCard && (
+                    <button className="ghost-button" type="button" onClick={handleCancelEditCreditCard}>
+                      Cancelar edição
+                    </button>
+                  )}
+                </div>
+              </form>
+
+              {creditCardSummaries.length === 0 ? (
+                <div className="empty-state compact">
+                  <Icon name="credit" />
+                  <p>Nenhum cartão cadastrado.</p>
+                  <small>Cadastre um cartão para vincular despesas em crédito.</small>
+                </div>
+              ) : (
+                <ul className="credit-card-list">
+                  {creditCardSummaries.map((card) => (
+                    <li
+                      key={card.id}
+                      className={`credit-card-item ${card.overLimit > 0 ? 'over' : card.usageRatio > 0.85 ? 'near' : ''}`}
+                    >
+                      <div className="credit-card-head">
+                        <div>
+                          <strong>{card.name}</strong>
+                          <small>{card.expenses.length} gasto(s) vinculado(s)</small>
+                        </div>
+                        <button
+                          className="mini-button"
+                          type="button"
+                          onClick={() => handleStartEditCreditCard(card)}
+                        >
+                          <Icon name="edit" size={13} />
+                          Editar limite
+                        </button>
+                      </div>
+
+                      <div className="credit-values-grid">
+                        <div>
+                          <small>Limite total</small>
+                          <strong>{formatCurrency(card.limit)}</strong>
+                        </div>
+                        <div>
+                          <small>Valor gasto</small>
+                          <strong className={card.overLimit > 0 ? 'negative' : ''}>
+                            {formatCurrency(card.totalSpent)}
+                          </strong>
+                        </div>
+                        <div>
+                          <small>Disponível</small>
+                          <strong className={card.available >= 0 ? 'positive' : 'negative'}>
+                            {formatCurrency(card.available)}
+                          </strong>
+                        </div>
+                        <div>
+                          <small>Uso do limite</small>
+                          <strong className={card.usageRatio > 1 ? 'negative' : ''}>
+                            {(card.usageRatio * 100).toFixed(1)}%
+                          </strong>
+                        </div>
+                      </div>
+
+                      <div className="goal-progress-track">
+                        <div
+                          className={`goal-progress-fill ${card.usageRatio > 1 ? 'over' : card.usageRatio > 0.85 ? 'near' : 'ok'}`}
+                          style={{ width: `${Math.min(card.usageRatio * 100, 100)}%` }}
+                        />
+                      </div>
+
+                      {card.expenses.length === 0 ? (
+                        <small className="section-note">Sem gastos nesse cartão até o momento.</small>
+                      ) : (
+                        <ul className="credit-expense-list">
+                          {card.expenses.slice(0, 8).map((entry) => (
+                            <li key={entry.id} className="credit-expense-item">
+                              <div>
+                                <p>{getEntryCategoryLabel(entry)}</p>
+                                <small>{getDisplayDate(entry.date, activeLanguageCode)}</small>
+                              </div>
+                              <strong className="negative">{formatCurrency(entry.value)}</strong>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {creditOrphanEntries.length > 0 && (
+                <div className="warning-box">
+                  <div className="warning-head">
+                    <Icon name="alert" size={15} />
+                    <strong>Lançamentos sem cartão encontrado</strong>
+                  </div>
+                  <p>
+                    {creditOrphanEntries.length} lançamento(s) em crédito estão sem vínculo válido de cartão.
+                  </p>
+                </div>
+              )}
             </article>
           </section>
         )}
@@ -4424,7 +4998,7 @@ function App() {
                       type="search"
                       value={globalSearchQuery}
                       onChange={handleGlobalSearchChange}
-                      placeholder="Categoria, subcategoria, descrição, valor ou data"
+                      placeholder="Categoria, subcategoria, pagamento, cartão, valor ou data"
                     />
                     {globalSearchQuery && (
                       <button className="mini-button" type="button" onClick={handleClearGlobalSearch}>
@@ -4507,6 +5081,21 @@ function App() {
                             <span className="tag-pill recurring">
                               <Icon name="repeat" size={12} />
                               Mensal
+                            </span>
+                          )}
+                          {entry.type === 'despesa' && entry.paymentMethod && (
+                            <span className="tag-pill payment-method">
+                              <Icon
+                                name={entry.paymentMethod === 'credito' ? 'credit' : 'wallet'}
+                                size={12}
+                              />
+                              {getPaymentMethodLabel(entry.paymentMethod)}
+                            </span>
+                          )}
+                          {entry.type === 'despesa' && entry.paymentMethod === 'credito' && (
+                            <span className="tag-pill credit-card">
+                              <Icon name="credit" size={12} />
+                              {creditCardsById.get(entry.creditCardId ?? '')?.name ?? 'Sem cartão'}
                             </span>
                           )}
                         </div>
@@ -5390,10 +5979,11 @@ function App() {
                   <p>
                     O backup <strong>{pendingImport.fileName}</strong> irá substituir os dados atuais.
                   </p>
-                  <ul className="warning-list">
-                    <li>Lançamentos: {pendingImport.summary.entriesCount}</li>
-                    <li>Metas: {pendingImport.summary.goalsCount}</li>
-                    <li>Recorrências: {pendingImport.summary.recurringCount}</li>
+                    <ul className="warning-list">
+                      <li>Lançamentos: {pendingImport.summary.entriesCount}</li>
+                      <li>Metas: {pendingImport.summary.goalsCount}</li>
+                      <li>Cartões de crédito: {pendingImport.summary.creditCardsCount}</li>
+                      <li>Recorrências: {pendingImport.summary.recurringCount}</li>
                     <li>Ativos de investimento: {pendingImport.summary.investmentAssetsCount}</li>
                     <li>Movimentações de investimento: {pendingImport.summary.investmentMovementsCount}</li>
                     <li>Anotações do diário: {pendingImport.summary.investmentJournalCount}</li>
@@ -5415,26 +6005,157 @@ function App() {
       </main>
 
       <nav className="bottom-nav" aria-label="Navegação principal">
-        {PRIMARY_TAB_ITEMS.map((tab) => (
-          <button
-            type="button"
-            key={tab.id}
-            className={`nav-item ${tab.isAction ? 'launch-action' : ''} ${activeTab === tab.id ? 'active' : ''}`}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            {tab.isAction ? (
-              <span className="launch-circle" aria-hidden="true">
-                <Icon name="plus" size={20} />
-              </span>
-            ) : (
-              <>
-                <span className="nav-indicator" aria-hidden="true" />
-                <Icon name={tab.icon} size={18} />
-              </>
-            )}
-            <span className="nav-label">{t(`nav.${tab.id}`)}</span>
-          </button>
-        ))}
+        {PRIMARY_TAB_ITEMS.map((tab) => {
+          const isMenuTab = tab.isMenu
+          const isTabActive = isMenuTab ? isSecondaryMenuOpen : activeTab === tab.id
+
+          const navButton = (
+            <button
+              type="button"
+              key={tab.id}
+              className={`nav-item ${tab.isAction ? 'launch-action' : ''} ${isTabActive ? 'active' : ''}`}
+              onClick={() => {
+                if (isMenuTab) {
+                  handleToggleSecondaryMenu()
+                  return
+                }
+                setIsSecondaryMenuOpen(false)
+                setSecondaryMenuSection('main')
+                setActiveTab(tab.id)
+              }}
+              aria-haspopup={isMenuTab ? 'menu' : undefined}
+              aria-expanded={isMenuTab ? isSecondaryMenuOpen : undefined}
+              aria-label={isMenuTab ? t('menu.open') : undefined}
+            >
+              {tab.isAction ? (
+                <span className="launch-circle" aria-hidden="true">
+                  <Icon name="plus" size={20} />
+                </span>
+              ) : (
+                <>
+                  <span className="nav-indicator" aria-hidden="true" />
+                  <Icon name={tab.icon} size={18} />
+                </>
+              )}
+              <span className="nav-label">{t(`nav.${tab.id}`)}</span>
+            </button>
+          )
+
+          if (!isMenuTab) {
+            return navButton
+          }
+
+          return (
+            <div className="nav-menu-slot" key={tab.id} ref={secondaryMenuRef}>
+              {navButton}
+
+              {isSecondaryMenuOpen && (
+                <div
+                  className="secondary-menu-panel bottom-menu-panel"
+                  role="menu"
+                  aria-label={t('menu.section')}
+                >
+                  {secondaryMenuSection === 'main' ? (
+                    <>
+                      <p className="menu-section-title">{t('menu.section')}</p>
+                      <div className="secondary-menu-links">
+                        {SECONDARY_MENU_ITEMS.map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            className={`secondary-menu-link ${activeTab === item.id ? 'active' : ''}`}
+                            onClick={() => handleNavigateFromMenu(item.id)}
+                          >
+                            <span className="secondary-menu-link-main">
+                              <Icon name={item.icon} size={15} />
+                              {t(`menu.${item.id}`)}
+                            </span>
+                            <Icon name="chevron-right" size={14} />
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          className={`secondary-menu-link ${secondaryMenuSection === 'settings' ? 'active' : ''}`}
+                          onClick={handleOpenSettingsSection}
+                        >
+                          <span className="secondary-menu-link-main">
+                            <Icon name="settings" size={15} />
+                            {t('menu.settings')}
+                          </span>
+                          <Icon name="chevron-right" size={14} />
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="settings-menu-head">
+                        <button
+                          className="mini-button"
+                          type="button"
+                          onClick={handleBackToMainMenu}
+                        >
+                          <Icon name="chevron-left" size={14} />
+                          {t('menu.settings.back')}
+                        </button>
+                        <strong>{t('menu.settings.title')}</strong>
+                      </div>
+
+                      <div className="settings-controls">
+                        <label className="settings-control">
+                          <span>
+                            <Icon name="reports" size={14} /> {t('settings.language')}
+                          </span>
+                          <select
+                            value={activeLanguageCode}
+                            onChange={(event) => handleSelectLanguage(event.target.value)}
+                          >
+                            {LANGUAGE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="settings-control">
+                          <span>
+                            <Icon name="wallet" size={14} /> {t('settings.currency')}
+                          </span>
+                          <select
+                            value={activeCurrencyCode}
+                            onChange={(event) => handleSelectCurrency(event.target.value)}
+                          >
+                            {CURRENCY_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="settings-control">
+                          <span>
+                            <Icon name="system" size={14} /> {t('settings.theme')}
+                          </span>
+                          <select
+                            value={themePreference}
+                            onChange={(event) => handleSelectTheme(event.target.value)}
+                          >
+                            {THEME_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {t(option.labelKey)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })}
       </nav>
     </div>
   )

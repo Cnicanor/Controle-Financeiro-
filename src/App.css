@@ -138,6 +138,12 @@
   z-index: 60;
 }
 
+.bottom-menu-panel {
+  top: auto;
+  bottom: calc(100% + 0.46rem);
+  width: min(90vw, 17rem);
+}
+
 .menu-section-title {
   margin: 0 0 0.44rem;
   font-size: 0.71rem;
@@ -688,6 +694,16 @@
   background: #dcfdf8;
 }
 
+.tag-pill.payment-method {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.tag-pill.credit-card {
+  color: #6d28d9;
+  background: #ede9fe;
+}
+
 .entry-side {
   display: flex;
   flex-direction: column;
@@ -998,6 +1014,97 @@
   gap: 0.64rem;
 }
 
+.credit-card-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.64rem;
+}
+
+.credit-card-item {
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  padding: 0.72rem;
+  background: var(--surface);
+}
+
+.credit-card-item.near {
+  border-color: var(--goal-near-border);
+  background: var(--goal-near-bg);
+}
+
+.credit-card-item.over {
+  border-color: var(--goal-over-border);
+  background: var(--goal-over-bg);
+}
+
+.credit-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.credit-card-head strong {
+  display: block;
+  font-size: 0.92rem;
+}
+
+.credit-card-head small {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.credit-values-grid {
+  margin-top: 0.58rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.credit-values-grid small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.73rem;
+}
+
+.credit-values-grid strong {
+  font-size: 0.84rem;
+}
+
+.credit-expense-list {
+  margin: 0.65rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.credit-expense-item {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.5rem 0.56rem;
+  background: var(--surface-muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.credit-expense-item p {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.credit-expense-item small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
 .investment-asset-list {
   margin: 0;
   padding: 0;
@@ -1184,6 +1291,14 @@
   gap: 0.45rem;
 }
 
+.inline-warning-box {
+  margin: 0;
+}
+
+.inline-warning-box p {
+  margin: 0.45rem 0 0.62rem;
+}
+
 .empty-state {
   border: 1px dashed var(--border-strong);
   border-radius: 12px;
@@ -1240,11 +1355,19 @@
   background: var(--nav-bg);
   backdrop-filter: blur(10px);
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.22rem;
   padding: 0.56rem;
   position: sticky;
   bottom: 0;
+}
+
+.nav-menu-slot {
+  position: relative;
+}
+
+.nav-menu-slot .nav-item {
+  width: 100%;
 }
 
 .nav-item {
@@ -1362,6 +1485,16 @@ body.dark .type-pill.asset-type {
 body.dark .tag-pill.recurring {
   color: #99f6e4;
   background: #17483f;
+}
+
+body.dark .tag-pill.payment-method {
+  color: #93c5fd;
+  background: #1d3550;
+}
+
+body.dark .tag-pill.credit-card {
+  color: #d8b4fe;
+  background: #36235f;
 }
 
 body.dark .goal-alert-list li {
