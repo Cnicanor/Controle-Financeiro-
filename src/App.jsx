@@ -11,8 +11,12 @@ const TAB_ITEMS = [
 
 const CATEGORY_OPTIONS = {
   receita: ['Salário', 'Freelance', 'Investimentos', 'Outros'],
-  despesa: ['Moradia', 'Alimentação', 'Transporte', 'Saúde', 'Lazer', 'Contas', 'Outros'],
+  despesa: ['Moradia', 'Alimentação', 'Transporte', 'Pet', 'Saúde', 'Lazer', 'Contas', 'Outros'],
 }
+const SUBCATEGORY_OPTIONS = Object.freeze({
+  Transporte: ['Financiamento', 'Combustível', 'Estacionamento', 'Pedágio'],
+  Pet: ['Ração', 'Banho e tosa', 'Vacina'],
+})
 
 const EXPENSE_CATEGORIES = CATEGORY_OPTIONS.despesa
 const INVESTMENT_ASSET_TYPES = [
@@ -183,11 +187,59 @@ function isInCurrentMonth(isoDate) {
   return getMonthKeyFromIsoDate(isoDate) === getCurrentMonthKey()
 }
 
+function getSubcategoryOptions(category) {
+  if (typeof category !== 'string') {
+    return []
+  }
+
+  return SUBCATEGORY_OPTIONS[category] ?? []
+}
+
+function normalizeEntrySubcategory(
+  rawSubcategory,
+  category,
+  { preserveWhenNoPreset = true } = {},
+) {
+  const normalizedSubcategory =
+    typeof rawSubcategory === 'string' ? rawSubcategory.trim() : ''
+
+  if (!normalizedSubcategory) {
+    return ''
+  }
+
+  const allowedSubcategories = getSubcategoryOptions(category)
+  if (allowedSubcategories.length === 0) {
+    return preserveWhenNoPreset ? normalizedSubcategory : ''
+  }
+
+  return allowedSubcategories.includes(normalizedSubcategory)
+    ? normalizedSubcategory
+    : ''
+}
+
+function getEntryCategoryLabel(entry) {
+  if (!entry) {
+    return ''
+  }
+
+  const category =
+    typeof entry.category === 'string' ? entry.category.trim() : ''
+  const subcategory =
+    typeof entry.subcategory === 'string' ? entry.subcategory.trim() : ''
+
+  if (!category) {
+    return ''
+  }
+
+  return subcategory ? `${category} > ${subcategory}` : category
+}
+
 function getInitialForm(type = 'despesa') {
   return {
     type,
     value: '',
     category: CATEGORY_OPTIONS[type][0],
+    subcategory: '',
     date: getInputDate(),
     description: '',
     recurrence: 'none',
@@ -235,12 +287,26 @@ function sanitizeStoredEntry(rawEntry) {
 
   const type = rawEntry.type === 'receita' || rawEntry.type === 'despesa' ? rawEntry.type : null
   const value = parseAmount(rawEntry.value)
+  const rawCategory =
+    typeof rawEntry.category === 'string' ? rawEntry.category.trim() : ''
+  const hasCategoryPathFallback =
+    !rawEntry.subcategory &&
+    rawCategory.includes('>')
+  const [fallbackCategory = '', fallbackSubcategory = ''] =
+    hasCategoryPathFallback
+      ? rawCategory.split('>').map((item) => item.trim())
+      : [rawCategory, '']
   const category =
-    typeof rawEntry.category === 'string' && rawEntry.category.trim()
-      ? rawEntry.category.trim()
+    fallbackCategory
+      ? fallbackCategory
       : type
         ? CATEGORY_OPTIONS[type][0]
         : ''
+  const subcategory = normalizeEntrySubcategory(
+    rawEntry.subcategory ?? fallbackSubcategory,
+    category,
+    { preserveWhenNoPreset: true },
+  )
   const date = typeof rawEntry.date === 'string' ? rawEntry.date : ''
   const description = typeof rawEntry.description === 'string' ? rawEntry.description.trim() : ''
 
@@ -265,6 +331,7 @@ function sanitizeStoredEntry(rawEntry) {
     type,
     value,
     category,
+    subcategory,
     date,
     description,
     recurrence,
@@ -487,8 +554,13 @@ function ensureCashAsset(assets) {
 }
 
 function loadEntriesFromStorage(defaultEntries) {
+  const sanitizeEntries = (entries) =>
+    entries
+      .map((entry) => sanitizeStoredEntry(entry))
+      .filter((entry) => Boolean(entry))
+
   if (typeof window === 'undefined') {
-    return defaultEntries
+    return sanitizeEntries(defaultEntries)
   }
 
   try {
@@ -497,21 +569,19 @@ function loadEntriesFromStorage(defaultEntries) {
       window.localStorage.getItem(LEGACY_STORAGE_ENTRIES_KEY)
 
     if (!rawStorage) {
-      return defaultEntries
+      return sanitizeEntries(defaultEntries)
     }
 
     const parsedStorage = JSON.parse(rawStorage)
     if (!Array.isArray(parsedStorage)) {
-      return defaultEntries
+      return sanitizeEntries(defaultEntries)
     }
 
-    const sanitizedEntries = parsedStorage
-      .map((entry) => sanitizeStoredEntry(entry))
-      .filter((entry) => Boolean(entry))
+    const sanitizedEntries = sanitizeEntries(parsedStorage)
 
     return sanitizedEntries
   } catch {
-    return defaultEntries
+    return sanitizeEntries(defaultEntries)
   }
 }
 
@@ -762,6 +832,7 @@ function buildRecurringSummaries(entries) {
     type: entry.type,
     value: entry.value,
     category: entry.category,
+    subcategory: entry.subcategory ?? '',
     description: entry.description,
     dayOfMonth: Number(entry.date.slice(8, 10)),
   }))
@@ -787,6 +858,7 @@ function buildRecurringEntryForMonth(templateEntry, monthKey) {
     type: templateEntry.type,
     value: templateEntry.value,
     category: templateEntry.category,
+    subcategory: templateEntry.subcategory ?? '',
     date: nextDate,
     description: templateEntry.description,
     recurrence: 'monthly',
@@ -1146,6 +1218,18 @@ function validateFormData(formData) {
     errors.category = 'Escolha uma categoria.'
   }
 
+  const subcategory = normalizeEntrySubcategory(formData.subcategory, category, {
+    preserveWhenNoPreset: true,
+  })
+  const categorySuboptions = getSubcategoryOptions(category)
+  if (
+    categorySuboptions.length > 0 &&
+    String(formData.subcategory ?? '').trim() !== '' &&
+    !subcategory
+  ) {
+    errors.subcategory = 'Escolha uma subcategoria válida.'
+  }
+
   const date = typeof formData.date === 'string' ? formData.date : ''
   if (!date) {
     errors.date = 'Informe a data.'
@@ -1169,6 +1253,7 @@ function validateFormData(formData) {
       type: formData.type,
       value: parsedValue,
       category,
+      subcategory,
       date,
       description,
       recurrence: formData.recurrence,
@@ -1779,7 +1864,11 @@ function App() {
   const [formData, setFormData] = useState(getInitialForm())
   const [formErrors, setFormErrors] = useState({})
   const [editingEntryId, setEditingEntryId] = useState(null)
-  const [historyFilters, setHistoryFilters] = useState({ type: 'todos', category: 'todas' })
+  const [historyFilters, setHistoryFilters] = useState({
+    type: 'todos',
+    category: 'todas',
+    subcategory: 'todas',
+  })
   const [goalForm, setGoalForm] = useState({ category: EXPENSE_CATEGORIES[0], limit: '' })
   const [goalErrors, setGoalErrors] = useState({})
   const [investmentAssetForm, setInvestmentAssetForm] = useState(() =>
@@ -1877,6 +1966,7 @@ function App() {
   const suggestedLaunchEntry = lastEntryByType[formData.type]
   const suggestedLaunchValue = suggestedLaunchEntry?.value ?? null
   const suggestedLaunchCategory = suggestedLaunchEntry?.category ?? ''
+  const suggestedLaunchSubcategory = suggestedLaunchEntry?.subcategory ?? ''
   const hasLaunchSmartSuggestion = Boolean(suggestedLaunchEntry && !isEditing)
   const isLaunchValueEmpty = String(formData.value ?? '').trim() === ''
   const canSuggestLaunchValue =
@@ -1884,7 +1974,10 @@ function App() {
   const canSuggestLaunchCategory =
     hasLaunchSmartSuggestion &&
     Boolean(suggestedLaunchCategory) &&
-    formData.category !== suggestedLaunchCategory
+    (
+      formData.category !== suggestedLaunchCategory ||
+      formData.subcategory !== suggestedLaunchSubcategory
+    )
   const canApplyFullSuggestion = canSuggestLaunchValue || canSuggestLaunchCategory
   const isInstallGuideDismissed = installGuideState.dismissedUntil > Date.now()
   const installSuggestionMode = useMemo(() => {
@@ -1956,10 +2049,41 @@ function App() {
     return totals
   }, [monthlyEntries])
 
-  const monthlyExpenseByCategory = useMemo(
-    () => Array.from(monthlyExpenseTotals.entries()).sort((a, b) => b[1] - a[1]),
-    [monthlyExpenseTotals],
-  )
+  const monthlyExpenseByCategory = useMemo(() => {
+    const grouped = new Map()
+
+    for (const entry of monthlyEntries) {
+      if (entry.type !== 'despesa') {
+        continue
+      }
+
+      const existingGroup = grouped.get(entry.category) ?? {
+        category: entry.category,
+        total: 0,
+        subcategories: new Map(),
+      }
+
+      existingGroup.total += entry.value
+
+      if (entry.subcategory) {
+        existingGroup.subcategories.set(
+          entry.subcategory,
+          (existingGroup.subcategories.get(entry.subcategory) ?? 0) + entry.value,
+        )
+      }
+
+      grouped.set(entry.category, existingGroup)
+    }
+
+    return Array.from(grouped.values())
+      .map((group) => ({
+        category: group.category,
+        total: group.total,
+        subcategories: Array.from(group.subcategories.entries())
+          .sort((a, b) => b[1] - a[1]),
+      }))
+      .sort((a, b) => b.total - a.total)
+  }, [monthlyEntries])
 
   const recurringSummaries = useMemo(() => buildRecurringSummaries(entries), [entries])
   const recurringActiveCount = recurringSummaries.length
@@ -2159,23 +2283,53 @@ function App() {
     ? historyFilters.category
     : 'todas'
 
+  const historySubcategoryOptions = useMemo(() => {
+    if (activeHistoryCategory === 'todas') {
+      return ['todas']
+    }
+
+    const subcategories = new Set(getSubcategoryOptions(activeHistoryCategory))
+
+    entries.forEach((entry) => {
+      if (
+        (historyFilters.type === 'todos' || entry.type === historyFilters.type) &&
+        entry.category === activeHistoryCategory &&
+        entry.subcategory
+      ) {
+        subcategories.add(entry.subcategory)
+      }
+    })
+
+    return ['todas', ...Array.from(subcategories).sort((a, b) => a.localeCompare(b))]
+  }, [entries, historyFilters.type, activeHistoryCategory])
+
+  const activeHistorySubcategory = historySubcategoryOptions.includes(historyFilters.subcategory)
+    ? historyFilters.subcategory
+    : 'todas'
+  const shouldShowHistorySubcategoryFilter =
+    activeHistoryCategory !== 'todas' && historySubcategoryOptions.length > 1
+
   const filteredHistoryEntries = useMemo(() => {
     return orderedEntries.filter((entry) => {
       const matchesType = historyFilters.type === 'todos' || entry.type === historyFilters.type
       const matchesCategory = activeHistoryCategory === 'todas' || entry.category === activeHistoryCategory
+      const matchesSubcategory =
+        activeHistorySubcategory === 'todas' ||
+        entry.subcategory === activeHistorySubcategory
       const searchBase = normalizeSearchText(
-        `${entry.category} ${entry.description} ${entry.date} ${entry.value} ${getTypeLabel(entry.type)}`,
+        `${entry.category} ${entry.subcategory ?? ''} ${getEntryCategoryLabel(entry)} ${entry.description} ${entry.date} ${entry.value} ${getTypeLabel(entry.type)}`,
       )
       const matchesSearch =
         !normalizedGlobalSearchQuery ||
         searchBase.includes(normalizedGlobalSearchQuery)
 
-      return matchesType && matchesCategory && matchesSearch
+      return matchesType && matchesCategory && matchesSubcategory && matchesSearch
     })
   }, [
     orderedEntries,
     historyFilters.type,
     activeHistoryCategory,
+    activeHistorySubcategory,
     normalizedGlobalSearchQuery,
   ])
 
@@ -2186,6 +2340,14 @@ function App() {
     }
     return [formData.category, ...defaults]
   }, [formData.type, formData.category])
+
+  const formSubcategoryOptions = useMemo(
+    () => getSubcategoryOptions(formData.category),
+    [formData.category],
+  )
+  const activeFormSubcategory = formSubcategoryOptions.includes(formData.subcategory)
+    ? formData.subcategory
+    : ''
 
   useEffect(() => {
     saveEntriesToStorage(entries)
@@ -2325,12 +2487,18 @@ function App() {
 
     setFormData((previous) => {
       if (name === 'type') {
+        const suggestedEntryForType = lastEntryByType[value]
         const suggestedCategoryForType =
-          lastEntryByType[value]?.category ?? CATEGORY_OPTIONS[value][0]
+          suggestedEntryForType?.category ?? CATEGORY_OPTIONS[value][0]
+        const suggestedSubcategoryForType =
+          suggestedEntryForType?.category === suggestedCategoryForType
+            ? suggestedEntryForType?.subcategory ?? ''
+            : ''
         return {
           ...previous,
           type: value,
           category: suggestedCategoryForType,
+          subcategory: suggestedSubcategoryForType,
         }
       }
 
@@ -2339,6 +2507,14 @@ function App() {
           ...previous,
           recurrence: 'none',
           recurrenceTemplateId: null,
+        }
+      }
+
+      if (name === 'category') {
+        return {
+          ...previous,
+          category: value,
+          subcategory: '',
         }
       }
 
@@ -2358,6 +2534,11 @@ function App() {
 
       if (name === 'type') {
         delete nextErrors.category
+        delete nextErrors.subcategory
+      }
+
+      if (name === 'category') {
+        delete nextErrors.subcategory
       }
 
       return nextErrors
@@ -2387,6 +2568,7 @@ function App() {
 
       if (includeCategory && suggestedLaunchCategory) {
         nextData.category = suggestedLaunchCategory
+        nextData.subcategory = suggestedLaunchSubcategory
       }
 
       if (
@@ -2411,6 +2593,7 @@ function App() {
       }
       if (includeCategory) {
         delete nextErrors.category
+        delete nextErrors.subcategory
       }
       if (includeDescription) {
         delete nextErrors.description
@@ -2424,13 +2607,14 @@ function App() {
   }
 
   const handleUseCategoryShortcut = (category) => {
-    setFormData((previous) => ({ ...previous, category }))
+    setFormData((previous) => ({ ...previous, category, subcategory: '' }))
     setFormErrors((previous) => {
-      if (!previous.category) {
+      if (!previous.category && !previous.subcategory) {
         return previous
       }
       const nextErrors = { ...previous }
       delete nextErrors.category
+      delete nextErrors.subcategory
       return nextErrors
     })
   }
@@ -2542,6 +2726,7 @@ function App() {
       type: entry.type,
       value: String(entry.value),
       category: entry.category,
+      subcategory: entry.subcategory ?? '',
       date: entry.date,
       description: entry.description,
       recurrence: entry.recurrence,
@@ -2601,7 +2786,11 @@ function App() {
     const { name, value } = event.target
     setHistoryFilters((previous) => {
       if (name === 'type') {
-        return { type: value, category: 'todas' }
+        return { type: value, category: 'todas', subcategory: 'todas' }
+      }
+
+      if (name === 'category') {
+        return { ...previous, category: value, subcategory: 'todas' }
       }
 
       return { ...previous, [name]: value }
@@ -2981,7 +3170,7 @@ function App() {
     resetInvestmentAssetForm()
     resetInvestmentMovementForm()
     resetInvestmentJournalForm()
-    setHistoryFilters({ type: 'todos', category: 'todas' })
+    setHistoryFilters({ type: 'todos', category: 'todas', subcategory: 'todas' })
     setInvestmentFilters({ assetType: 'todos', movementType: 'todos' })
     setActiveTab('home')
     saveLastRecurringRunMonth(getCurrentMonthKey())
@@ -3176,7 +3365,7 @@ function App() {
                   {orderedEntries.slice(0, 8).map((entry) => (
                     <li key={entry.id} className="entry-item">
                       <div className="entry-main">
-                        <p className="entry-title">{entry.category}</p>
+                        <p className="entry-title">{getEntryCategoryLabel(entry)}</p>
                         <div className="entry-meta">
                           <small>{getDisplayDate(entry.date)}</small>
                           <span className={`type-pill ${entry.type}`}>{getTypeLabel(entry.type)}</span>
@@ -3259,7 +3448,7 @@ function App() {
                     </small>
                   </div>
                   <p>
-                    {suggestedLaunchCategory} ·{' '}
+                    {getEntryCategoryLabel(suggestedLaunchEntry)} ·{' '}
                     {Number.isFinite(suggestedLaunchValue)
                       ? formatCurrency(suggestedLaunchValue)
                       : '--'}
@@ -3369,6 +3558,28 @@ function App() {
                   {formErrors.category && <p className="form-error">{formErrors.category}</p>}
                 </label>
 
+                {formSubcategoryOptions.length > 0 && (
+                  <label>
+                    <span className="field-label">
+                      <Icon name="tag" size={14} /> Subcategoria
+                    </span>
+                    <select
+                      className={formErrors.subcategory ? 'input-error' : ''}
+                      name="subcategory"
+                      value={activeFormSubcategory}
+                      onChange={handleFormChange}
+                    >
+                      <option value="">Sem subcategoria</option>
+                      {formSubcategoryOptions.map((subcategory) => (
+                        <option value={subcategory} key={subcategory}>
+                          {subcategory}
+                        </option>
+                      ))}
+                    </select>
+                    {formErrors.subcategory && <p className="form-error">{formErrors.subcategory}</p>}
+                  </label>
+                )}
+
                 {launchCategoryShortcuts.length > 0 && (
                   <div className="category-shortcuts">
                     <small>Categorias frequentes</small>
@@ -3477,7 +3688,7 @@ function App() {
                       type="search"
                       value={globalSearchQuery}
                       onChange={handleGlobalSearchChange}
-                      placeholder="Categoria, descrição, valor ou data"
+                      placeholder="Categoria, subcategoria, descrição, valor ou data"
                     />
                     {globalSearchQuery && (
                       <button className="mini-button" type="button" onClick={handleClearGlobalSearch}>
@@ -3514,6 +3725,25 @@ function App() {
                     ))}
                   </select>
                 </label>
+
+                {shouldShowHistorySubcategoryFilter && (
+                  <label className="filter-control">
+                    <span className="field-label">
+                      <Icon name="tag" size={14} /> Subcategoria
+                    </span>
+                    <select
+                      name="subcategory"
+                      value={activeHistorySubcategory}
+                      onChange={handleHistoryFilterChange}
+                    >
+                      {historySubcategoryOptions.map((subcategory) => (
+                        <option key={subcategory} value={subcategory}>
+                          {subcategory === 'todas' ? 'Todas' : subcategory}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
               </div>
 
               {orderedEntries.length === 0 ? (
@@ -3533,7 +3763,7 @@ function App() {
                   {filteredHistoryEntries.map((entry) => (
                     <li key={entry.id} className="entry-item">
                       <div className="entry-main">
-                        <p className="entry-title">{entry.category}</p>
+                        <p className="entry-title">{getEntryCategoryLabel(entry)}</p>
                         <div className="entry-meta">
                           <small>{getDisplayDate(entry.date)}</small>
                           <span className={`type-pill ${entry.type}`}>{getTypeLabel(entry.type)}</span>
@@ -4263,10 +4493,22 @@ function App() {
                 </div>
               ) : (
                 <ul className="entry-list">
-                  {monthlyExpenseByCategory.map(([category, total]) => (
-                    <li key={category} className="entry-item">
-                      <p className="entry-title">{category}</p>
-                      <strong className="negative">{formatCurrency(total)}</strong>
+                  {monthlyExpenseByCategory.map((item) => (
+                    <li key={item.category} className="entry-item">
+                      <div className="entry-main">
+                        <p className="entry-title">{item.category}</p>
+                        {item.subcategories.length > 0 && (
+                          <small>
+                            {item.subcategories
+                              .map(
+                                ([subcategory, total]) =>
+                                  `${subcategory}: ${formatCurrency(total)}`,
+                              )
+                              .join(' · ')}
+                          </small>
+                        )}
+                      </div>
+                      <strong className="negative">{formatCurrency(item.total)}</strong>
                     </li>
                   ))}
                 </ul>
