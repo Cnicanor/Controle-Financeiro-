@@ -2,15 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
 const PRIMARY_TAB_ITEMS = [
-  { id: 'home', label: 'Início', icon: 'home' },
-  { id: 'launch', label: 'Lançar', icon: 'plus', isAction: true },
-  { id: 'credit', label: 'Crédito', icon: 'credit' },
+  { id: 'home', icon: 'home' },
+  { id: 'launch', icon: 'plus', isAction: true },
+  { id: 'credit', icon: 'credit' },
 ]
 
 const SECONDARY_MENU_ITEMS = [
-  { id: 'investments', label: 'Investimentos', icon: 'investments' },
-  { id: 'history', label: 'Histórico', icon: 'history' },
-  { id: 'reports', label: 'Relatórios', icon: 'reports' },
+  { id: 'investments', icon: 'investments' },
+  { id: 'history', icon: 'history' },
+  { id: 'reports', icon: 'reports' },
 ]
 
 const CATEGORY_OPTIONS = {
@@ -62,6 +62,7 @@ const STORAGE_KEYS = Object.freeze({
   installGuide: 'controle_financeiro_install_guide_v1',
   theme: 'financas.theme',
   currency: 'financas.currency',
+  language: 'financas.language',
 })
 const STORAGE_ENTRIES_KEY = STORAGE_KEYS.entries
 const LEGACY_STORAGE_ENTRIES_KEY = STORAGE_KEYS.legacyEntries
@@ -73,18 +74,24 @@ const STORAGE_INVESTMENT_JOURNAL_KEY = STORAGE_KEYS.investmentJournal
 const STORAGE_INSTALL_GUIDE_KEY = STORAGE_KEYS.installGuide
 const STORAGE_THEME_KEY = STORAGE_KEYS.theme
 const STORAGE_CURRENCY_KEY = STORAGE_KEYS.currency
+const STORAGE_LANGUAGE_KEY = STORAGE_KEYS.language
 const TOAST_TIMEOUT_MS = 3200
 const DAY_IN_MS = 24 * 60 * 60 * 1000
 const INSTALL_PROMPT_SNOOZE_DAYS = 10
 const THEME_OPTIONS = Object.freeze([
-  { value: 'system', label: 'Seguir sistema', icon: 'system' },
-  { value: 'light', label: 'Tema claro', icon: 'sun' },
-  { value: 'dark', label: 'Tema escuro', icon: 'moon' },
+  { value: 'system', labelKey: 'settings.theme.system' },
+  { value: 'light', labelKey: 'settings.theme.light' },
+  { value: 'dark', labelKey: 'settings.theme.dark' },
 ])
 const CURRENCY_OPTIONS = Object.freeze([
   { value: 'BRL', label: 'BRL', locale: 'pt-BR' },
   { value: 'USD', label: 'USD', locale: 'en-US' },
   { value: 'EUR', label: 'EUR', locale: 'de-DE' },
+])
+const LANGUAGE_OPTIONS = Object.freeze([
+  { value: 'pt-BR', label: 'Português (Brasil)' },
+  { value: 'pt-PT', label: 'Português (Portugal)' },
+  { value: 'en-US', label: 'English (United States)' },
 ])
 const CURRENCY_META = Object.freeze(
   CURRENCY_OPTIONS.reduce((acc, option) => {
@@ -92,6 +99,164 @@ const CURRENCY_META = Object.freeze(
     return acc
   }, {}),
 )
+const LANGUAGE_META = Object.freeze(
+  LANGUAGE_OPTIONS.reduce((acc, option) => {
+    acc[option.value] = option
+    return acc
+  }, {}),
+)
+const UI_TEXT = Object.freeze({
+  'pt-BR': {
+    'header.eyebrow': 'Controle diário',
+    'header.title': 'Meu Financeiro',
+    'nav.home': 'Início',
+    'nav.launch': 'Lançar',
+    'nav.credit': 'Crédito',
+    'menu.open': 'Abrir menu',
+    'menu.section': 'Áreas secundárias',
+    'menu.investments': 'Investimentos',
+    'menu.history': 'Histórico',
+    'menu.reports': 'Relatórios',
+    'menu.settings': 'Configurações',
+    'menu.settings.title': 'Configurações',
+    'menu.settings.back': 'Voltar',
+    'settings.language': 'Idioma',
+    'settings.currency': 'Moeda',
+    'settings.theme': 'Tema',
+    'settings.theme.system': 'Seguir sistema',
+    'settings.theme.light': 'Tema claro',
+    'settings.theme.dark': 'Tema escuro',
+    'toast.currency': 'Moeda alterada para {value}.',
+    'toast.language': 'Idioma alterado para {value}.',
+    'toast.theme.system': 'Tema ajustado para seguir o sistema ({value}).',
+    'toast.theme.fixed': 'Tema {value} aplicado.',
+    'theme.label.light': 'claro',
+    'theme.label.dark': 'escuro',
+    'theme.label.system': 'sistema',
+    'screen.credit.title': 'Crédito',
+    'screen.credit.subtitle': 'Visão mensal',
+    'screen.credit.suggestedLimit': 'Limite sugerido',
+    'screen.credit.usageMonth': 'Uso no mês',
+    'screen.credit.available': 'Disponível',
+    'screen.credit.usageLimit': 'Uso do limite',
+    'screen.credit.reference':
+      'Baseado nas despesas do mês atual em relação a 30% da sua renda mensal.',
+    'screen.credit.tips': 'Dicas rápidas',
+    'screen.credit.tip1': 'Pague o total da fatura para evitar juros rotativos.',
+    'screen.credit.tip2': 'Mantenha uso abaixo de 30% do limite para mais folga no orçamento.',
+    'screen.credit.tip3': 'Concentre vencimentos próximos da data de maior entrada.',
+    'screen.home.investmentsSummary': 'Investimentos (resumo)',
+    'screen.home.statement': 'Extrato simplificado',
+    'screen.home.recurring': 'Recorrências mensais',
+    'screen.home.goalAlerts': 'Alertas de metas',
+    'screen.launch.new': 'Novo lançamento',
+    'screen.launch.edit': 'Editar lançamento',
+    'screen.history.title': 'Histórico',
+    'screen.investments.title': 'Investimentos',
+    'screen.reports.title': 'Relatórios',
+    'screen.reports.expensesCurrentMonth': 'Despesas por categoria (mês atual)',
+  },
+  'pt-PT': {
+    'header.eyebrow': 'Controlo diário',
+    'header.title': 'As Minhas Finanças',
+    'nav.home': 'Início',
+    'nav.launch': 'Lançar',
+    'nav.credit': 'Crédito',
+    'menu.open': 'Abrir menu',
+    'menu.section': 'Áreas secundárias',
+    'menu.investments': 'Investimentos',
+    'menu.history': 'Histórico',
+    'menu.reports': 'Relatórios',
+    'menu.settings': 'Configurações',
+    'menu.settings.title': 'Configurações',
+    'menu.settings.back': 'Voltar',
+    'settings.language': 'Idioma',
+    'settings.currency': 'Moeda',
+    'settings.theme': 'Tema',
+    'settings.theme.system': 'Seguir sistema',
+    'settings.theme.light': 'Tema claro',
+    'settings.theme.dark': 'Tema escuro',
+    'toast.currency': 'Moeda alterada para {value}.',
+    'toast.language': 'Idioma alterado para {value}.',
+    'toast.theme.system': 'Tema ajustado para seguir o sistema ({value}).',
+    'toast.theme.fixed': 'Tema {value} aplicado.',
+    'theme.label.light': 'claro',
+    'theme.label.dark': 'escuro',
+    'theme.label.system': 'sistema',
+    'screen.credit.title': 'Crédito',
+    'screen.credit.subtitle': 'Visão mensal',
+    'screen.credit.suggestedLimit': 'Limite sugerido',
+    'screen.credit.usageMonth': 'Uso no mês',
+    'screen.credit.available': 'Disponível',
+    'screen.credit.usageLimit': 'Uso do limite',
+    'screen.credit.reference':
+      'Com base nas despesas do mês atual face a 30% do seu rendimento mensal.',
+    'screen.credit.tips': 'Sugestões rápidas',
+    'screen.credit.tip1': 'Pague o total do cartão para evitar juros de crédito rotativo.',
+    'screen.credit.tip2': 'Mantenha a utilização abaixo de 30% do limite para maior folga.',
+    'screen.credit.tip3': 'Concentre vencimentos perto da data de maior entrada.',
+    'screen.home.investmentsSummary': 'Investimentos (resumo)',
+    'screen.home.statement': 'Extrato simplificado',
+    'screen.home.recurring': 'Recorrências mensais',
+    'screen.home.goalAlerts': 'Alertas de metas',
+    'screen.launch.new': 'Novo lançamento',
+    'screen.launch.edit': 'Editar lançamento',
+    'screen.history.title': 'Histórico',
+    'screen.investments.title': 'Investimentos',
+    'screen.reports.title': 'Relatórios',
+    'screen.reports.expensesCurrentMonth': 'Despesas por categoria (mês atual)',
+  },
+  'en-US': {
+    'header.eyebrow': 'Daily control',
+    'header.title': 'My Finance',
+    'nav.home': 'Home',
+    'nav.launch': 'Add',
+    'nav.credit': 'Credit',
+    'menu.open': 'Open menu',
+    'menu.section': 'Secondary areas',
+    'menu.investments': 'Investments',
+    'menu.history': 'History',
+    'menu.reports': 'Reports',
+    'menu.settings': 'Settings',
+    'menu.settings.title': 'Settings',
+    'menu.settings.back': 'Back',
+    'settings.language': 'Language',
+    'settings.currency': 'Currency',
+    'settings.theme': 'Theme',
+    'settings.theme.system': 'Follow system',
+    'settings.theme.light': 'Light theme',
+    'settings.theme.dark': 'Dark theme',
+    'toast.currency': 'Currency changed to {value}.',
+    'toast.language': 'Language changed to {value}.',
+    'toast.theme.system': 'Theme set to follow system ({value}).',
+    'toast.theme.fixed': '{value} theme applied.',
+    'theme.label.light': 'light',
+    'theme.label.dark': 'dark',
+    'theme.label.system': 'system',
+    'screen.credit.title': 'Credit',
+    'screen.credit.subtitle': 'Monthly view',
+    'screen.credit.suggestedLimit': 'Suggested limit',
+    'screen.credit.usageMonth': 'Month usage',
+    'screen.credit.available': 'Available',
+    'screen.credit.usageLimit': 'Limit usage',
+    'screen.credit.reference':
+      'Based on current month expenses against 30% of your monthly income.',
+    'screen.credit.tips': 'Quick tips',
+    'screen.credit.tip1': 'Pay your statement in full to avoid revolving interest.',
+    'screen.credit.tip2': 'Keep usage below 30% of the limit for better cash flow.',
+    'screen.credit.tip3': 'Align due dates with your main income date.',
+    'screen.home.investmentsSummary': 'Investments (summary)',
+    'screen.home.statement': 'Simple statement',
+    'screen.home.recurring': 'Monthly recurring',
+    'screen.home.goalAlerts': 'Goal alerts',
+    'screen.launch.new': 'New entry',
+    'screen.launch.edit': 'Edit entry',
+    'screen.history.title': 'History',
+    'screen.investments.title': 'Investments',
+    'screen.reports.title': 'Reports',
+    'screen.reports.expensesCurrentMonth': 'Expenses by category (current month)',
+  },
+})
 
 function padNumber(value) {
   return String(value).padStart(2, '0')
@@ -107,9 +272,9 @@ function getDateDaysAgo(days) {
   return getInputDate(date)
 }
 
-function getDisplayDate(isoDate) {
+function getDisplayDate(isoDate, locale = 'pt-BR') {
   const [year, month, day] = isoDate.split('-').map(Number)
-  return new Date(year, month - 1, day).toLocaleDateString('pt-BR')
+  return new Date(year, month - 1, day).toLocaleDateString(locale)
 }
 
 function isValidIsoDate(isoDate) {
@@ -186,9 +351,9 @@ function getMonthKeyFromIsoDate(isoDate) {
   return isoDate.slice(0, 7)
 }
 
-function getMonthLabelFromKey(monthKey) {
+function getMonthLabelFromKey(monthKey, locale = 'pt-BR') {
   const [year, month] = monthKey.split('-').map(Number)
-  return new Date(year, month - 1, 1).toLocaleDateString('pt-BR', {
+  return new Date(year, month - 1, 1).toLocaleDateString(locale, {
     month: 'long',
     year: 'numeric',
   })
@@ -823,14 +988,18 @@ function saveThemePreference(themePreference) {
   }
 }
 
-function getThemeLabel(themeOption) {
+function getThemeLabel(themeOption, translate) {
+  if (typeof translate !== 'function') {
+    return themeOption
+  }
+
   switch (themeOption) {
     case 'light':
-      return 'claro'
+      return translate('theme.label.light')
     case 'dark':
-      return 'escuro'
+      return translate('theme.label.dark')
     default:
-      return 'sistema'
+      return translate('theme.label.system')
   }
 }
 
@@ -864,6 +1033,56 @@ function saveCurrencyPreference(currencyCode) {
     window.localStorage.setItem(STORAGE_CURRENCY_KEY, normalizeCurrencyCode(currencyCode))
   } catch {
     // armazenamento local indisponível; segue sem persistir preferência
+  }
+}
+
+function normalizeLanguageCode(rawLanguage) {
+  return LANGUAGE_META[rawLanguage] ? rawLanguage : 'pt-BR'
+}
+
+function getLanguageOption(languageCode) {
+  return LANGUAGE_META[normalizeLanguageCode(languageCode)]
+}
+
+function loadLanguagePreference() {
+  if (typeof window === 'undefined') {
+    return 'pt-BR'
+  }
+
+  try {
+    const rawLanguage = window.localStorage.getItem(STORAGE_LANGUAGE_KEY)
+    return normalizeLanguageCode(rawLanguage)
+  } catch {
+    return 'pt-BR'
+  }
+}
+
+function saveLanguagePreference(languageCode) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(STORAGE_LANGUAGE_KEY, normalizeLanguageCode(languageCode))
+  } catch {
+    // armazenamento local indisponível; segue sem persistir preferência
+  }
+}
+
+function createTranslate(languageCode) {
+  const fallback = UI_TEXT['pt-BR']
+  const active = UI_TEXT[normalizeLanguageCode(languageCode)] ?? fallback
+
+  return (key, variables = null) => {
+    const baseText = active[key] ?? fallback[key] ?? key
+    if (!variables || typeof variables !== 'object') {
+      return baseText
+    }
+
+    return Object.entries(variables).reduce(
+      (result, [varKey, varValue]) => result.replaceAll(`{${varKey}}`, String(varValue)),
+      baseText,
+    )
   }
 }
 
@@ -1261,7 +1480,7 @@ function calculateInvestmentClassSummary(portfolioItems) {
     }))
 }
 
-function calculateInvestmentEvolution(assets, movements, months = 6) {
+function calculateInvestmentEvolution(assets, movements, months = 6, locale = 'pt-BR') {
   const monthKeys = getRecentMonthKeys(months)
 
   return monthKeys.map((monthKey) => {
@@ -1273,7 +1492,7 @@ function calculateInvestmentEvolution(assets, movements, months = 6) {
 
     return {
       monthKey,
-      label: getMonthLabelFromKey(monthKey),
+      label: getMonthLabelFromKey(monthKey, locale),
       currentTotal: snapshot.totals.currentTotal,
       investedCurrent: snapshot.totals.investedCurrent,
       cashCurrent: snapshot.totals.cashCurrent,
@@ -1957,10 +2176,23 @@ function Icon({ name, size = 18, className = '' }) {
           <path d="M4 7h16M4 12h16M4 17h16" />
         </svg>
       )
+    case 'settings':
+      return (
+        <svg {...baseProps}>
+          <circle cx="12" cy="12" r="2.7" />
+          <path d="M4.8 14.4 3 13l1.2-2.3 2-.2a6.6 6.6 0 0 1 .7-1.6L5.8 7l1.8-1.8 1.9 1.1a6.6 6.6 0 0 1 1.6-.7l.2-2h2.5l.2 2a6.6 6.6 0 0 1 1.6.7l1.9-1.1L20.2 7l-1.1 1.9c.3.5.6 1 .7 1.6l2 .2L23 13l-1.8 1.4a6.6 6.6 0 0 1-.7 1.6l1.1 1.9-1.8 1.8-1.9-1.1a6.6 6.6 0 0 1-1.6.7l-.2 2h-2.5l-.2-2a6.6 6.6 0 0 1-1.6-.7l-1.9 1.1-1.8-1.8 1.1-1.9a6.6 6.6 0 0 1-.7-1.6z" />
+        </svg>
+      )
     case 'chevron-right':
       return (
         <svg {...baseProps}>
           <path d="m9 6 6 6-6 6" />
+        </svg>
+      )
+    case 'chevron-left':
+      return (
+        <svg {...baseProps}>
+          <path d="m15 6-6 6 6 6" />
         </svg>
       )
     case 'share':
@@ -2027,10 +2259,11 @@ function App() {
     assetType: 'todos',
     movementType: 'todos',
   })
+  const [languageCode, setLanguageCode] = useState(() => loadLanguagePreference())
   const [themePreference, setThemePreference] = useState(() => loadThemePreference())
   const [systemTheme, setSystemTheme] = useState(() => detectSystemTheme())
-  const [isThemeSelectorOpen, setIsThemeSelectorOpen] = useState(false)
   const [isSecondaryMenuOpen, setIsSecondaryMenuOpen] = useState(false)
+  const [secondaryMenuSection, setSecondaryMenuSection] = useState('main')
   const [currencyCode, setCurrencyCode] = useState(() => loadCurrencyPreference())
   const [globalSearchQuery, setGlobalSearchQuery] = useState('')
   const [launchSavedPulse, setLaunchSavedPulse] = useState(false)
@@ -2046,20 +2279,21 @@ function App() {
     bootSnapshot.autoGeneratedCount > 0
       ? {
           type: 'info',
-          message: `${bootSnapshot.autoGeneratedCount} lançamento(s) recorrente(s) já foram gerados para ${getMonthLabelFromKey(getCurrentMonthKey())}.`,
+          message: `${bootSnapshot.autoGeneratedCount} lançamento(s) recorrente(s) já foram gerados para ${getMonthLabelFromKey(getCurrentMonthKey(), normalizeLanguageCode(loadLanguagePreference()))}.`,
         }
       : null,
   )
 
   const importInputRef = useRef(null)
-  const themeSelectorRef = useRef(null)
   const secondaryMenuRef = useRef(null)
   const deferredInstallPromptRef = useRef(null)
   const isEditingInvestmentAsset = editingInvestmentAssetId !== null
   const isEditing = editingEntryId !== null
+  const activeLanguageCode = normalizeLanguageCode(languageCode)
+  const t = useMemo(() => createTranslate(activeLanguageCode), [activeLanguageCode])
   const now = new Date()
   const currentMonthKey = getCurrentMonthKey()
-  const monthLabel = now.toLocaleDateString('pt-BR', { month: 'long' })
+  const monthLabel = now.toLocaleDateString(activeLanguageCode, { month: 'long' })
   const activeCurrencyCode = normalizeCurrencyCode(currencyCode)
   const activeCurrencyOption = getCurrencyOption(activeCurrencyCode)
   const currencyFormatter = useMemo(
@@ -2319,8 +2553,14 @@ function App() {
   )
 
   const portfolioEvolution = useMemo(
-    () => calculateInvestmentEvolution(investmentAssetsSafe, investmentMovements, 6),
-    [investmentAssetsSafe, investmentMovements],
+    () =>
+      calculateInvestmentEvolution(
+        investmentAssetsSafe,
+        investmentMovements,
+        6,
+        activeLanguageCode,
+      ),
+    [investmentAssetsSafe, investmentMovements, activeLanguageCode],
   )
   const maxEvolutionValue = useMemo(
     () => Math.max(1, ...portfolioEvolution.map((item) => item.currentTotal)),
@@ -2546,6 +2786,10 @@ function App() {
   }, [themePreference])
 
   useEffect(() => {
+    saveLanguagePreference(activeLanguageCode)
+  }, [activeLanguageCode])
+
+  useEffect(() => {
     saveCurrencyPreference(activeCurrencyCode)
   }, [activeCurrencyCode])
 
@@ -2587,34 +2831,6 @@ function App() {
   }, [activeTheme, themePreference])
 
   useEffect(() => {
-    if (!isThemeSelectorOpen || typeof document === 'undefined') {
-      return undefined
-    }
-
-    const handleOutsidePress = (event) => {
-      if (themeSelectorRef.current?.contains(event.target)) {
-        return
-      }
-
-      setIsThemeSelectorOpen(false)
-    }
-
-    const handleEscape = (event) => {
-      if (event.key === 'Escape') {
-        setIsThemeSelectorOpen(false)
-      }
-    }
-
-    document.addEventListener('pointerdown', handleOutsidePress)
-    document.addEventListener('keydown', handleEscape)
-
-    return () => {
-      document.removeEventListener('pointerdown', handleOutsidePress)
-      document.removeEventListener('keydown', handleEscape)
-    }
-  }, [isThemeSelectorOpen])
-
-  useEffect(() => {
     if (!isSecondaryMenuOpen || typeof document === 'undefined') {
       return undefined
     }
@@ -2625,11 +2841,13 @@ function App() {
       }
 
       setIsSecondaryMenuOpen(false)
+      setSecondaryMenuSection('main')
     }
 
     const handleEscape = (event) => {
       if (event.key === 'Escape') {
         setIsSecondaryMenuOpen(false)
+        setSecondaryMenuSection('main')
       }
     }
 
@@ -2643,14 +2861,9 @@ function App() {
   }, [isSecondaryMenuOpen])
 
   useEffect(() => {
-    if (activeTab !== 'home' && isThemeSelectorOpen) {
-      setIsThemeSelectorOpen(false)
-    }
-  }, [activeTab, isThemeSelectorOpen])
-
-  useEffect(() => {
     if (isSecondaryMenuOpen) {
       setIsSecondaryMenuOpen(false)
+      setSecondaryMenuSection('main')
     }
   }, [activeTab, isSecondaryMenuOpen])
 
@@ -2757,48 +2970,52 @@ function App() {
     setToast({ type, message })
   }
 
-  const handleToggleThemeSelector = () => {
-    setIsThemeSelectorOpen((previous) => {
+  const handleToggleSecondaryMenu = () => {
+    setIsSecondaryMenuOpen((previous) => {
       const next = !previous
       if (next) {
-        setIsSecondaryMenuOpen(false)
+        setSecondaryMenuSection('main')
       }
       return next
     })
   }
 
-  const handleToggleSecondaryMenu = () => {
-    setIsSecondaryMenuOpen((previous) => {
-      const next = !previous
-      if (next) {
-        setIsThemeSelectorOpen(false)
-      }
-      return next
-    })
+  const handleOpenSettingsSection = () => {
+    setSecondaryMenuSection('settings')
+  }
+
+  const handleBackToMainMenu = () => {
+    setSecondaryMenuSection('main')
   }
 
   const handleSelectTheme = (nextTheme) => {
     const normalizedTheme = normalizeThemePreference(nextTheme)
     setThemePreference(normalizedTheme)
-    setIsThemeSelectorOpen(false)
     showToast(
       'info',
       normalizedTheme === 'system'
-        ? `Tema ajustado para seguir o sistema (${getThemeLabel(systemTheme)}).`
-        : `Tema ${getThemeLabel(normalizedTheme)} aplicado.`,
+        ? t('toast.theme.system', { value: getThemeLabel(systemTheme, t) })
+        : t('toast.theme.fixed', { value: getThemeLabel(normalizedTheme, t) }),
     )
   }
 
   const handleSelectCurrency = (nextCurrencyCode) => {
     const normalizedCurrency = normalizeCurrencyCode(nextCurrencyCode)
     setCurrencyCode(normalizedCurrency)
-    setIsSecondaryMenuOpen(false)
-    showToast('info', `Moeda alterada para ${normalizedCurrency}.`)
+    showToast('info', t('toast.currency', { value: normalizedCurrency }))
+  }
+
+  const handleSelectLanguage = (nextLanguageCode) => {
+    const normalizedLanguage = normalizeLanguageCode(nextLanguageCode)
+    const nextLanguageLabel = getLanguageOption(normalizedLanguage).label
+    setLanguageCode(normalizedLanguage)
+    showToast('info', t('toast.language', { value: nextLanguageLabel }))
   }
 
   const handleNavigateFromMenu = (tabId) => {
     setActiveTab(tabId)
     setIsSecondaryMenuOpen(false)
+    setSecondaryMenuSection('main')
   }
 
   const resetLaunchForm = (type = 'despesa') => {
@@ -3095,7 +3312,10 @@ function App() {
     const generatedEntries = generateRecurringEntriesForMonth(entries, currentMonthKey)
 
     if (generatedEntries.length === 0) {
-      showToast('info', `Nenhum lançamento recorrente pendente para ${getMonthLabelFromKey(currentMonthKey)}.`)
+      showToast(
+        'info',
+        `Nenhum lançamento recorrente pendente para ${getMonthLabelFromKey(currentMonthKey, activeLanguageCode)}.`,
+      )
       return
     }
 
@@ -3103,7 +3323,7 @@ function App() {
     saveLastRecurringRunMonth(currentMonthKey)
     showToast(
       'success',
-      `${generatedEntries.length} lançamento(s) recorrente(s) gerado(s) para ${getMonthLabelFromKey(currentMonthKey)}.`,
+      `${generatedEntries.length} lançamento(s) recorrente(s) gerado(s) para ${getMonthLabelFromKey(currentMonthKey, activeLanguageCode)}.`,
     )
   }
 
@@ -3522,10 +3742,10 @@ function App() {
         <header className="top-header">
           <div className="top-header-main">
             <div className="top-header-info">
-              <p className="eyebrow">Controle diário</p>
-              <h1>Meu Financeiro</h1>
+              <p className="eyebrow">{t('header.eyebrow')}</p>
+              <h1>{t('header.title')}</h1>
               <p className="header-date">
-                {now.toLocaleDateString('pt-BR', {
+                {now.toLocaleDateString(activeLanguageCode, {
                   weekday: 'long',
                   day: '2-digit',
                   month: 'long',
@@ -3534,59 +3754,12 @@ function App() {
             </div>
 
             <div className="header-actions">
-              {activeTab === 'home' && (
-                <div className="theme-selector" ref={themeSelectorRef}>
-                  <button
-                    className="icon-button theme-trigger"
-                    type="button"
-                    onClick={handleToggleThemeSelector}
-                    aria-label="Abrir seletor de tema"
-                    aria-haspopup="menu"
-                    aria-expanded={isThemeSelectorOpen}
-                  >
-                    <Icon
-                      name={
-                        themePreference === 'system'
-                          ? 'system'
-                          : activeTheme === 'dark'
-                            ? 'moon'
-                            : 'sun'
-                      }
-                      size={16}
-                    />
-                  </button>
-
-                  {isThemeSelectorOpen && (
-                    <div className="theme-selector-menu" role="menu" aria-label="Selecionar tema">
-                      {THEME_OPTIONS.map((option) => (
-                        <button
-                          key={option.value}
-                          type="button"
-                          className={`theme-option ${themePreference === option.value ? 'active' : ''}`}
-                          onClick={() => handleSelectTheme(option.value)}
-                          role="menuitemradio"
-                          aria-checked={themePreference === option.value}
-                        >
-                          <span className="theme-option-main">
-                            <Icon name={option.icon} size={15} />
-                            {option.label}
-                          </span>
-                          {option.value === 'system' && (
-                            <small>{systemTheme === 'dark' ? 'Sistema: escuro' : 'Sistema: claro'}</small>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
               <div className="secondary-menu" ref={secondaryMenuRef}>
                 <button
                   className="icon-button menu-trigger"
                   type="button"
                   onClick={handleToggleSecondaryMenu}
-                  aria-label="Abrir menu"
+                  aria-label={t('menu.open')}
                   aria-haspopup="menu"
                   aria-expanded={isSecondaryMenuOpen}
                 >
@@ -3594,42 +3767,103 @@ function App() {
                 </button>
 
                 {isSecondaryMenuOpen && (
-                  <div className="secondary-menu-panel" role="menu" aria-label="Menu secundário">
-                    <p className="menu-section-title">Áreas secundárias</p>
-                    <div className="secondary-menu-links">
-                      {SECONDARY_MENU_ITEMS.map((item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          className={`secondary-menu-link ${activeTab === item.id ? 'active' : ''}`}
-                          onClick={() => handleNavigateFromMenu(item.id)}
-                        >
-                          <span className="secondary-menu-link-main">
-                            <Icon name={item.icon} size={15} />
-                            {item.label}
-                          </span>
-                          <Icon name="chevron-right" size={14} />
-                        </button>
-                      ))}
-                    </div>
+                  <div className="secondary-menu-panel" role="menu" aria-label={t('menu.section')}>
+                    {secondaryMenuSection === 'main' ? (
+                      <>
+                        <p className="menu-section-title">{t('menu.section')}</p>
+                        <div className="secondary-menu-links">
+                          {SECONDARY_MENU_ITEMS.map((item) => (
+                            <button
+                              key={item.id}
+                              type="button"
+                              className={`secondary-menu-link ${activeTab === item.id ? 'active' : ''}`}
+                              onClick={() => handleNavigateFromMenu(item.id)}
+                            >
+                              <span className="secondary-menu-link-main">
+                                <Icon name={item.icon} size={15} />
+                                {t(`menu.${item.id}`)}
+                              </span>
+                              <Icon name="chevron-right" size={14} />
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            className={`secondary-menu-link ${secondaryMenuSection === 'settings' ? 'active' : ''}`}
+                            onClick={handleOpenSettingsSection}
+                          >
+                            <span className="secondary-menu-link-main">
+                              <Icon name="settings" size={15} />
+                              {t('menu.settings')}
+                            </span>
+                            <Icon name="chevron-right" size={14} />
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="settings-menu-head">
+                          <button
+                            className="mini-button"
+                            type="button"
+                            onClick={handleBackToMainMenu}
+                          >
+                            <Icon name="chevron-left" size={14} />
+                            {t('menu.settings.back')}
+                          </button>
+                          <strong>{t('menu.settings.title')}</strong>
+                        </div>
 
-                    <div className="menu-divider" />
+                        <div className="settings-controls">
+                          <label className="settings-control">
+                            <span>
+                              <Icon name="reports" size={14} /> {t('settings.language')}
+                            </span>
+                            <select
+                              value={activeLanguageCode}
+                              onChange={(event) => handleSelectLanguage(event.target.value)}
+                            >
+                              {LANGUAGE_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
 
-                    <label className="currency-selector">
-                      <span>
-                        <Icon name="wallet" size={14} /> Moeda
-                      </span>
-                      <select
-                        value={activeCurrencyCode}
-                        onChange={(event) => handleSelectCurrency(event.target.value)}
-                      >
-                        {CURRENCY_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                          <label className="settings-control">
+                            <span>
+                              <Icon name="wallet" size={14} /> {t('settings.currency')}
+                            </span>
+                            <select
+                              value={activeCurrencyCode}
+                              onChange={(event) => handleSelectCurrency(event.target.value)}
+                            >
+                              {CURRENCY_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+
+                          <label className="settings-control">
+                            <span>
+                              <Icon name="system" size={14} /> {t('settings.theme')}
+                            </span>
+                            <select
+                              value={themePreference}
+                              onChange={(event) => handleSelectTheme(event.target.value)}
+                            >
+                              {THEME_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {t(option.labelKey)}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -3749,7 +3983,7 @@ function App() {
               <div className="panel-heading">
                 <h3>
                   <Icon name="investments" size={16} className="heading-icon" />
-                  Investimentos (resumo)
+                  {t('screen.home.investmentsSummary')}
                 </h3>
                 <span>{portfolioItems.length} ativos</span>
               </div>
@@ -3781,7 +4015,7 @@ function App() {
 
             <article className="panel">
               <div className="panel-heading">
-                <h3>Extrato simplificado</h3>
+                <h3>{t('screen.home.statement')}</h3>
                 <span>{orderedEntries.length} movimentações</span>
               </div>
 
@@ -3798,7 +4032,7 @@ function App() {
                       <div className="entry-main">
                         <p className="entry-title">{getEntryCategoryLabel(entry)}</p>
                         <div className="entry-meta">
-                          <small>{getDisplayDate(entry.date)}</small>
+                          <small>{getDisplayDate(entry.date, activeLanguageCode)}</small>
                           <span className={`type-pill ${entry.type}`}>{getTypeLabel(entry.type)}</span>
                           {entry.recurrence === 'monthly' && (
                             <span className="tag-pill recurring">
@@ -3821,7 +4055,7 @@ function App() {
 
             <article className="panel">
               <div className="panel-heading">
-                <h3>Recorrências mensais</h3>
+                <h3>{t('screen.home.recurring')}</h3>
                 <span>{recurringActiveCount} ativas</span>
               </div>
 
@@ -3841,7 +4075,7 @@ function App() {
             {goalAlerts.length > 0 && (
               <article className="panel warning-panel">
                 <div className="panel-heading">
-                  <h3>Alertas de metas</h3>
+                  <h3>{t('screen.home.goalAlerts')}</h3>
                   <span>{goalAlerts.length} categoria(s)</span>
                 </div>
                 <ul className="goal-alert-list">
@@ -3866,7 +4100,7 @@ function App() {
           <section className="screen">
             <article className="panel">
               <div className="panel-heading">
-                <h2>{isEditing ? 'Editar lançamento' : 'Novo lançamento'}</h2>
+                <h2>{isEditing ? t('screen.launch.edit') : t('screen.launch.new')}</h2>
               </div>
 
               {hasLaunchSmartSuggestion && (
@@ -3875,7 +4109,7 @@ function App() {
                     <strong>Atalho inteligente</strong>
                     <small>
                       Último {formData.type === 'receita' ? 'receita' : 'despesa'} em{' '}
-                      {getDisplayDate(suggestedLaunchEntry.date)}
+                      {getDisplayDate(suggestedLaunchEntry.date, activeLanguageCode)}
                     </small>
                   </div>
                   <p>
@@ -4105,30 +4339,30 @@ function App() {
               <div className="panel-heading">
                 <h2>
                   <Icon name="credit" size={16} className="heading-icon" />
-                  Crédito
+                  {t('screen.credit.title')}
                 </h2>
-                <span>Visão mensal</span>
+                <span>{t('screen.credit.subtitle')}</span>
               </div>
 
               <div className="summary-grid">
                 <div className="summary-item">
-                  <p>Limite sugerido</p>
+                  <p>{t('screen.credit.suggestedLimit')}</p>
                   <strong>{formatCurrency(creditSuggestedLimit)}</strong>
                 </div>
                 <div className="summary-item">
-                  <p>Uso no mês</p>
+                  <p>{t('screen.credit.usageMonth')}</p>
                   <strong className={creditUsageRatio > 1 ? 'negative' : ''}>
                     {formatCurrency(monthlySummary.expense)}
                   </strong>
                 </div>
                 <div className="summary-item">
-                  <p>Disponível</p>
+                  <p>{t('screen.credit.available')}</p>
                   <strong className={creditRemaining > 0 ? 'positive' : 'negative'}>
                     {formatCurrency(creditRemaining)}
                   </strong>
                 </div>
                 <div className="summary-item">
-                  <p>Uso do limite</p>
+                  <p>{t('screen.credit.usageLimit')}</p>
                   <strong className={creditUsageRatio > 1 ? 'negative' : ''}>
                     {(creditUsageRatio * 100).toFixed(1)}%
                   </strong>
@@ -4137,33 +4371,33 @@ function App() {
 
               <div className="credit-progress-block">
                 <div className="goal-progress-track">
-                  <div
+                <div
                     className={`goal-progress-fill ${creditUsageRatio > 1 ? 'over' : creditUsageRatio > 0.85 ? 'near' : 'ok'}`}
                     style={{ width: `${Math.min(creditUsageRatio * 100, 100)}%` }}
                   />
                 </div>
                 <small className="section-note">
-                  Baseado nas despesas do mês atual em relação a 30% da sua renda mensal.
+                  {t('screen.credit.reference')}
                 </small>
               </div>
             </article>
 
             <article className="panel">
               <div className="panel-heading">
-                <h3>Dicas rápidas</h3>
+                <h3>{t('screen.credit.tips')}</h3>
               </div>
               <ul className="goal-alert-list">
                 <li>
                   <Icon name="check" size={14} />
-                  <span>Pague o total da fatura para evitar juros rotativos.</span>
+                  <span>{t('screen.credit.tip1')}</span>
                 </li>
                 <li>
                   <Icon name="alert" size={14} />
-                  <span>Mantenha uso abaixo de 30% do limite para mais folga no orçamento.</span>
+                  <span>{t('screen.credit.tip2')}</span>
                 </li>
                 <li>
                   <Icon name="calendar" size={14} />
-                  <span>Concentre vencimentos próximos da data de maior entrada.</span>
+                  <span>{t('screen.credit.tip3')}</span>
                 </li>
               </ul>
             </article>
@@ -4174,7 +4408,7 @@ function App() {
           <section className="screen">
             <article className="panel">
               <div className="panel-heading">
-                <h2>Histórico</h2>
+                <h2>{t('screen.history.title')}</h2>
                 <span>
                   {filteredHistoryEntries.length} de {orderedEntries.length}
                 </span>
@@ -4267,7 +4501,7 @@ function App() {
                       <div className="entry-main">
                         <p className="entry-title">{getEntryCategoryLabel(entry)}</p>
                         <div className="entry-meta">
-                          <small>{getDisplayDate(entry.date)}</small>
+                          <small>{getDisplayDate(entry.date, activeLanguageCode)}</small>
                           <span className={`type-pill ${entry.type}`}>{getTypeLabel(entry.type)}</span>
                           {entry.recurrence === 'monthly' && (
                             <span className="tag-pill recurring">
@@ -4325,9 +4559,9 @@ function App() {
               <div className="panel-heading">
                 <h2>
                   <Icon name="investments" size={16} className="heading-icon" />
-                  Painel de investimentos
+                  {t('screen.investments.title')}
                 </h2>
-                <span>{getMonthLabelFromKey(currentMonthKey)}</span>
+                <span>{getMonthLabelFromKey(currentMonthKey, activeLanguageCode)}</span>
               </div>
 
               <div className="report-grid">
@@ -4803,7 +5037,7 @@ function App() {
                       <div className="entry-main">
                         <p className="entry-title">{investmentAssetsById.get(movement.assetId)?.name ?? 'Ativo removido'}</p>
                         <div className="entry-meta">
-                          <small>{getDisplayDate(movement.date)}</small>
+                          <small>{getDisplayDate(movement.date, activeLanguageCode)}</small>
                           <span className="tag-pill recurring">{getMovementTypeLabel(movement.movementType)}</span>
                           <span className="type-pill asset-type">{movement.assetType}</span>
                         </div>
@@ -4923,7 +5157,7 @@ function App() {
                   {sortedInvestmentJournal.map((entry) => (
                     <li key={entry.id} className="entry-item">
                       <div className="entry-main">
-                        <p className="entry-title">{getDisplayDate(entry.date)}</p>
+                        <p className="entry-title">{getDisplayDate(entry.date, activeLanguageCode)}</p>
                         <div className="entry-meta">
                           {entry.assetId ? (
                             <span className="type-pill asset-type">
@@ -4957,7 +5191,7 @@ function App() {
           <section className="screen">
             <article className="panel">
               <div className="panel-heading">
-                <h2>Relatórios</h2>
+                <h2>{t('screen.reports.title')}</h2>
               </div>
 
               <div className="report-grid">
@@ -4984,7 +5218,7 @@ function App() {
 
             <article className="panel">
               <div className="panel-heading">
-                <h3>Despesas por categoria (mês atual)</h3>
+                <h3>{t('screen.reports.expensesCurrentMonth')}</h3>
               </div>
 
               {monthlyExpenseByCategory.length === 0 ? (
@@ -5198,7 +5432,7 @@ function App() {
                 <Icon name={tab.icon} size={18} />
               </>
             )}
-            <span className="nav-label">{tab.label}</span>
+            <span className="nav-label">{t(`nav.${tab.id}`)}</span>
           </button>
         ))}
       </nav>

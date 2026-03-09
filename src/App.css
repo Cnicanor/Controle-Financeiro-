@@ -115,32 +115,6 @@
   font-size: 0.9rem;
 }
 
-.theme-selector {
-  position: relative;
-  margin-top: 0.08rem;
-}
-
-.theme-trigger {
-  width: 2.12rem;
-  height: 2.12rem;
-}
-
-.theme-selector-menu {
-  position: absolute;
-  top: calc(100% + 0.42rem);
-  right: 0;
-  width: 11rem;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface-elevated);
-  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.14);
-  padding: 0.36rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  z-index: 60;
-}
-
 .secondary-menu {
   position: relative;
   margin-top: 0.08rem;
@@ -214,13 +188,31 @@
   margin: 0.56rem 0;
 }
 
-.currency-selector {
+.settings-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  margin-bottom: 0.56rem;
+}
+
+.settings-menu-head strong {
+  font-size: 0.83rem;
+}
+
+.settings-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.54rem;
+}
+
+.settings-control {
   display: flex;
   flex-direction: column;
   gap: 0.34rem;
 }
 
-.currency-selector span {
+.settings-control span {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
@@ -229,48 +221,13 @@
   color: var(--muted);
 }
 
-.currency-selector select {
+.settings-control select {
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface-muted);
   color: var(--text);
   padding: 0.56rem 0.62rem;
   font: inherit;
-}
-
-.theme-option {
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text);
-  border-radius: 10px;
-  width: 100%;
-  padding: 0.45rem 0.5rem;
-  text-align: left;
-  font: inherit;
-  font-size: 0.79rem;
-  font-weight: 700;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-
-.theme-option-main {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.34rem;
-}
-
-.theme-option small {
-  color: var(--muted);
-  font-size: 0.7rem;
-  font-weight: 600;
-}
-
-.theme-option.active {
-  border-color: #78d0c2;
-  background: #e8faf6;
-  color: #0f615f;
 }
 
 .screen {
@@ -1265,7 +1222,6 @@
 .ghost-button:focus-visible,
 .mini-button:focus-visible,
 .mini-chip:focus-visible,
-.theme-option:focus-visible,
 .secondary-menu-link:focus-visible,
 .icon-button:focus-visible,
 .launch-form input:focus-visible,
@@ -1273,7 +1229,7 @@
 .launch-form textarea:focus-visible,
 .filter-control input:focus-visible,
 .filter-control select:focus-visible,
-.currency-selector select:focus-visible,
+.settings-control select:focus-visible,
 .nav-item:focus-visible {
   outline: 2px solid #0f766e;
   outline-offset: 2px;
@@ -1350,16 +1306,6 @@
 .nav-item.active .nav-indicator {
   background: var(--heading-accent);
   transform: scale(1.2);
-}
-
-body.dark .theme-selector-menu {
-  box-shadow: 0 14px 28px rgba(2, 6, 23, 0.55);
-}
-
-body.dark .theme-option.active {
-  border-color: #2ea79f;
-  background: #123f42;
-  color: #d8fff8;
 }
 
 body.dark .secondary-menu-panel {
