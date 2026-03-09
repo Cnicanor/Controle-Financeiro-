@@ -24,6 +24,10 @@ const PAYMENT_METHOD_OPTIONS = Object.freeze([
   { value: 'debito', label: 'Débito' },
   { value: 'credito', label: 'Crédito' },
 ])
+const CREDIT_CHARGE_OPTIONS = Object.freeze([
+  { value: 'avista', label: 'À vista' },
+  { value: 'parcelado', label: 'Parcelado' },
+])
 const CASH_PAYMENT_METHODS = new Set(['pix', 'dinheiro', 'debito'])
 const MAX_CREDIT_CARDS = 5
 const SUBCATEGORY_OPTIONS = Object.freeze({
@@ -420,6 +424,99 @@ function resolveSelectedCreditCardId(rawCreditCardId, cardsById, cards = []) {
   return cards[0]?.id ?? ''
 }
 
+function normalizeCreditChargeType(rawChargeType, paymentMethod) {
+  if (paymentMethod !== 'credito') {
+    return null
+  }
+
+  return rawChargeType === 'parcelado' ? 'parcelado' : 'avista'
+}
+
+function normalizeInstallmentsCount(rawInstallments, chargeType) {
+  if (chargeType !== 'parcelado') {
+    return 1
+  }
+
+  const parsed = Number.parseInt(String(rawInstallments ?? ''), 10)
+  if (!Number.isFinite(parsed)) {
+    return 2
+  }
+
+  return Math.min(Math.max(parsed, 2), 36)
+}
+
+function splitInstallmentValues(totalValue, installmentsCount) {
+  const cents = Math.round(totalValue * 100)
+  const baseInstallment = Math.floor(cents / installmentsCount)
+  const remainder = cents - baseInstallment * installmentsCount
+  const installmentValues = new Array(installmentsCount).fill(baseInstallment)
+
+  for (let index = 0; index < remainder; index += 1) {
+    installmentValues[index] += 1
+  }
+
+  return installmentValues.map((valueInCents) => valueInCents / 100)
+}
+
+function addMonthsToIsoDate(isoDate, offset) {
+  const [year, month, day] = isoDate.split('-').map(Number)
+  const baseDate = new Date(year, month - 1 + offset, 1)
+  const lastDay = getLastDayOfMonth(baseDate.getFullYear(), baseDate.getMonth() + 1)
+  const safeDay = Math.min(day, lastDay)
+
+  return `${baseDate.getFullYear()}-${padNumber(baseDate.getMonth() + 1)}-${padNumber(safeDay)}`
+}
+
+function buildInstallmentSchedule(entry) {
+  if (!entry || entry.type !== 'despesa' || entry.paymentMethod !== 'credito') {
+    return []
+  }
+
+  const chargeType = normalizeCreditChargeType(entry.creditChargeType, entry.paymentMethod)
+  const installmentsCount = normalizeInstallmentsCount(entry.installmentsCount, chargeType)
+
+  if (chargeType !== 'parcelado' || installmentsCount <= 1) {
+    return []
+  }
+
+  const installmentValues = splitInstallmentValues(entry.value, installmentsCount)
+
+  return installmentValues.map((installmentValue, index) => ({
+    installmentNumber: index + 1,
+    installmentsCount,
+    value: installmentValue,
+    date: addMonthsToIsoDate(entry.date, index),
+    label: `Parcela ${index + 1}/${installmentsCount}`,
+  }))
+}
+
+function expandEntryToTimeline(entry) {
+  const installmentSchedule = buildInstallmentSchedule(entry)
+  if (installmentSchedule.length === 0) {
+    return [
+      {
+        ...entry,
+        timelineId: entry.id,
+        sourceEntryId: entry.id,
+        installmentLabel: '',
+        installmentNumber: null,
+        installmentsCount: null,
+      },
+    ]
+  }
+
+  return installmentSchedule.map((installment) => ({
+    ...entry,
+    timelineId: `${entry.id}::${installment.installmentNumber}`,
+    sourceEntryId: entry.id,
+    date: installment.date,
+    value: installment.value,
+    installmentLabel: installment.label,
+    installmentNumber: installment.installmentNumber,
+    installmentsCount: installment.installmentsCount,
+  }))
+}
+
 function normalizeEntrySubcategory(
   rawSubcategory,
   category,
@@ -461,12 +558,18 @@ function getEntryCategoryLabel(entry) {
 
 function getInitialForm(type = 'despesa', creditCards = []) {
   const paymentMethod = type === 'despesa' ? 'debito' : ''
+  const creditChargeType = type === 'despesa' && paymentMethod === 'credito' ? 'avista' : ''
   return {
     type,
     value: '',
     category: CATEGORY_OPTIONS[type][0],
     subcategory: '',
     paymentMethod,
+    creditChargeType,
+    installmentsCount:
+      type === 'despesa' && paymentMethod === 'credito' && creditChargeType === 'parcelado'
+        ? 2
+        : 1,
     creditCardId:
       type === 'despesa' && paymentMethod === 'credito'
         ? creditCards[0]?.id ?? ''
@@ -542,6 +645,11 @@ function sanitizeStoredEntry(rawEntry) {
   const description = typeof rawEntry.description === 'string' ? rawEntry.description.trim() : ''
   const paymentMethod = normalizeEntryPaymentMethod(rawEntry.paymentMethod, type)
   const creditCardId = normalizeEntryCreditCardId(rawEntry.creditCardId, paymentMethod)
+  const creditChargeType = normalizeCreditChargeType(rawEntry.creditChargeType, paymentMethod)
+  const installmentsCount = normalizeInstallmentsCount(
+    rawEntry.installmentsCount,
+    creditChargeType,
+  )
 
   const rawRecurrence = rawEntry.recurrence
   const recurrence = rawRecurrence === 'monthly' ? 'monthly' : 'none'
@@ -569,6 +677,8 @@ function sanitizeStoredEntry(rawEntry) {
     description,
     paymentMethod,
     creditCardId,
+    creditChargeType,
+    installmentsCount,
     recurrence,
     recurrenceTemplateId,
   }
@@ -1279,6 +1389,11 @@ function buildRecurringSummaries(entries) {
 
   return Array.from(templateMap.values()).map((entry) => {
     const paymentMethod = normalizeEntryPaymentMethod(entry.paymentMethod, entry.type)
+    const creditChargeType = normalizeCreditChargeType(entry.creditChargeType, paymentMethod)
+    const installmentsCount = normalizeInstallmentsCount(
+      entry.installmentsCount,
+      creditChargeType,
+    )
     return {
       templateId: entry.recurrenceTemplateId,
       type: entry.type,
@@ -1287,6 +1402,8 @@ function buildRecurringSummaries(entries) {
       subcategory: entry.subcategory ?? '',
       paymentMethod,
       creditCardId: normalizeEntryCreditCardId(entry.creditCardId, paymentMethod),
+      creditChargeType,
+      installmentsCount,
       description: entry.description,
       dayOfMonth: Number(entry.date.slice(8, 10)),
     }
@@ -1308,6 +1425,14 @@ function buildRecurringEntryForMonth(templateEntry, monthKey) {
   const day = Math.min(templateDay, getLastDayOfMonth(year, month))
   const nextDate = `${year}-${padNumber(month)}-${padNumber(day)}`
   const paymentMethod = normalizeEntryPaymentMethod(templateEntry.paymentMethod, templateEntry.type)
+  const creditChargeType = normalizeCreditChargeType(
+    templateEntry.creditChargeType,
+    paymentMethod,
+  )
+  const installmentsCount = normalizeInstallmentsCount(
+    templateEntry.installmentsCount,
+    creditChargeType,
+  )
 
   return {
     id: createEntryId(),
@@ -1317,6 +1442,8 @@ function buildRecurringEntryForMonth(templateEntry, monthKey) {
     subcategory: templateEntry.subcategory ?? '',
     paymentMethod,
     creditCardId: normalizeEntryCreditCardId(templateEntry.creditCardId, paymentMethod),
+    creditChargeType,
+    installmentsCount,
     date: nextDate,
     description: templateEntry.description,
     recurrence: 'monthly',
@@ -1707,6 +1834,11 @@ function validateFormData(formData, creditCardsById = new Map()) {
 
   const paymentMethod = normalizeEntryPaymentMethod(formData.paymentMethod, formData.type)
   const creditCardId = normalizeEntryCreditCardId(formData.creditCardId, paymentMethod)
+  const creditChargeType = normalizeCreditChargeType(formData.creditChargeType, paymentMethod)
+  const installmentsCount = normalizeInstallmentsCount(
+    formData.installmentsCount,
+    creditChargeType,
+  )
 
   if (formData.type === 'despesa' && !paymentMethod) {
     errors.paymentMethod = 'Escolha uma forma de pagamento válida.'
@@ -1717,6 +1849,20 @@ function validateFormData(formData, creditCardsById = new Map()) {
       errors.creditCardId = 'Selecione um cartão de crédito.'
     } else if (creditCardsById.size > 0 && !creditCardsById.has(creditCardId)) {
       errors.creditCardId = 'Selecione um cartão de crédito válido.'
+    }
+
+    if (!creditChargeType) {
+      errors.creditChargeType = 'Escolha como será a cobrança no cartão.'
+    }
+
+    if (creditChargeType === 'parcelado') {
+      if (String(formData.installmentsCount ?? '').trim() === '') {
+        errors.installmentsCount = 'Informe a quantidade de parcelas.'
+      } else if (!Number.isInteger(installmentsCount) || installmentsCount < 2) {
+        errors.installmentsCount = 'Use pelo menos 2 parcelas.'
+      } else if (installmentsCount > 36) {
+        errors.installmentsCount = 'Use no máximo 36 parcelas.'
+      }
     }
   }
 
@@ -1731,6 +1877,8 @@ function validateFormData(formData, creditCardsById = new Map()) {
       description,
       paymentMethod,
       creditCardId,
+      creditChargeType,
+      installmentsCount,
       recurrence: formData.recurrence,
     },
   }
@@ -2014,6 +2162,10 @@ function getTypeLabel(type) {
 
 function getPaymentMethodLabel(paymentMethod) {
   return PAYMENT_METHOD_OPTIONS.find((option) => option.value === paymentMethod)?.label ?? ''
+}
+
+function getCreditChargeLabel(creditChargeType) {
+  return CREDIT_CHARGE_OPTIONS.find((option) => option.value === creditChargeType)?.label ?? ''
 }
 
 function isCreditExpenseEntry(entry) {
@@ -2471,8 +2623,6 @@ function App() {
   const [languageCode, setLanguageCode] = useState(() => loadLanguagePreference())
   const [themePreference, setThemePreference] = useState(() => loadThemePreference())
   const [systemTheme, setSystemTheme] = useState(() => detectSystemTheme())
-  const [isSecondaryMenuOpen, setIsSecondaryMenuOpen] = useState(false)
-  const [secondaryMenuSection, setSecondaryMenuSection] = useState('main')
   const [currencyCode, setCurrencyCode] = useState(() => loadCurrencyPreference())
   const [globalSearchQuery, setGlobalSearchQuery] = useState('')
   const [launchSavedPulse, setLaunchSavedPulse] = useState(false)
@@ -2494,7 +2644,6 @@ function App() {
   )
 
   const importInputRef = useRef(null)
-  const secondaryMenuRef = useRef(null)
   const deferredInstallPromptRef = useRef(null)
   const isEditingInvestmentAsset = editingInvestmentAssetId !== null
   const isEditingCreditCard = editingCreditCardId !== null
@@ -2521,6 +2670,14 @@ function App() {
 
   const orderedEntries = useMemo(
     () => [...entries].sort((a, b) => b.date.localeCompare(a.date)),
+    [entries],
+  )
+  const entriesById = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries])
+  const orderedTimelineEntries = useMemo(
+    () =>
+      entries
+        .flatMap((entry) => expandEntryToTimeline(entry))
+        .sort((a, b) => b.date.localeCompare(a.date)),
     [entries],
   )
 
@@ -2611,6 +2768,10 @@ function App() {
     () => entries.filter((entry) => isInCurrentMonth(entry.date)),
     [entries],
   )
+  const monthlyTimelineEntries = useMemo(
+    () => orderedTimelineEntries.filter((entry) => isInCurrentMonth(entry.date)),
+    [orderedTimelineEntries],
+  )
 
   const totalBalance = useMemo(
     () =>
@@ -2639,42 +2800,43 @@ function App() {
             acc.income += entry.value
           } else if (isCashExpenseEntry(entry)) {
             acc.expense += entry.value
-          } else if (isCreditExpenseEntry(entry)) {
-            acc.creditExpense += entry.value
           }
 
           return acc
         },
-        { income: 0, expense: 0, creditExpense: 0 },
+        { income: 0, expense: 0 },
       ),
     [monthlyEntries],
   )
 
   const monthlyBalance = monthlySummary.income - monthlySummary.expense
   const savingsRate = monthlySummary.income > 0 ? (monthlyBalance / monthlySummary.income) * 100 : 0
+  const monthlyCreditExpense = useMemo(
+    () =>
+      monthlyTimelineEntries
+        .filter((entry) => isCreditExpenseEntry(entry))
+        .reduce((total, entry) => total + entry.value, 0),
+    [monthlyTimelineEntries],
+  )
+  const monthlyExpenseEntries = useMemo(
+    () => monthlyTimelineEntries.filter((entry) => entry.type === 'despesa'),
+    [monthlyTimelineEntries],
+  )
 
   const monthlyExpenseTotals = useMemo(() => {
     const totals = new Map()
 
-    for (const entry of monthlyEntries) {
-      if (entry.type !== 'despesa') {
-        continue
-      }
-
+    for (const entry of monthlyExpenseEntries) {
       totals.set(entry.category, (totals.get(entry.category) ?? 0) + entry.value)
     }
 
     return totals
-  }, [monthlyEntries])
+  }, [monthlyExpenseEntries])
 
   const monthlyExpenseByCategory = useMemo(() => {
     const grouped = new Map()
 
-    for (const entry of monthlyEntries) {
-      if (entry.type !== 'despesa') {
-        continue
-      }
-
+    for (const entry of monthlyExpenseEntries) {
       const existingGroup = grouped.get(entry.category) ?? {
         category: entry.category,
         total: 0,
@@ -2701,7 +2863,7 @@ function App() {
           .sort((a, b) => b[1] - a[1]),
       }))
       .sort((a, b) => b.total - a.total)
-  }, [monthlyEntries])
+  }, [monthlyExpenseEntries])
 
   const recurringSummaries = useMemo(() => buildRecurringSummaries(entries), [entries])
   const recurringActiveCount = recurringSummaries.length
@@ -2907,31 +3069,49 @@ function App() {
     () => orderedEntries.filter((entry) => isCreditExpenseEntry(entry)),
     [orderedEntries],
   )
-
-  const monthlyCreditExpense = monthlySummary.creditExpense
+  const creditTimelineEntries = useMemo(
+    () => orderedTimelineEntries.filter((entry) => isCreditExpenseEntry(entry)),
+    [orderedTimelineEntries],
+  )
 
   const creditCardSummaries = useMemo(
     () =>
       creditCards.map((card) => {
         const expenses = creditExpenseEntries.filter((entry) => entry.creditCardId === card.id)
-        const totalSpent = expenses.reduce((total, entry) => total + entry.value, 0)
-        const monthlySpent = expenses
+        const timelineExpenses = creditTimelineEntries.filter((entry) => entry.creditCardId === card.id)
+        const upfrontExpenses = expenses.filter(
+          (entry) => normalizeCreditChargeType(entry.creditChargeType, entry.paymentMethod) !== 'parcelado',
+        )
+        const installmentExpenses = expenses.filter(
+          (entry) => normalizeCreditChargeType(entry.creditChargeType, entry.paymentMethod) === 'parcelado',
+        )
+        const upfrontTotal = upfrontExpenses.reduce((total, entry) => total + entry.value, 0)
+        const installmentTotal = installmentExpenses.reduce((total, entry) => total + entry.value, 0)
+        const committedTotal = upfrontTotal + installmentTotal
+        const monthlySpent = timelineExpenses
           .filter((entry) => isInCurrentMonth(entry.date))
           .reduce((total, entry) => total + entry.value, 0)
-        const available = card.limit - totalSpent
-        const usageRatio = card.limit > 0 ? totalSpent / card.limit : 0
+        const futureInstallments = timelineExpenses
+          .filter((entry) => getMonthKeyFromIsoDate(entry.date) > currentMonthKey)
+          .reduce((total, entry) => total + entry.value, 0)
+        const available = card.limit - committedTotal
+        const usageRatio = card.limit > 0 ? committedTotal / card.limit : 0
 
         return {
           ...card,
           expenses,
-          totalSpent,
+          timelineExpenses,
+          upfrontTotal,
+          installmentTotal,
+          committedTotal,
           monthlySpent,
+          futureInstallments,
           available,
           usageRatio,
-          overLimit: Math.max(totalSpent - card.limit, 0),
+          overLimit: Math.max(committedTotal - card.limit, 0),
         }
       }),
-    [creditCards, creditExpenseEntries],
+    [creditCards, creditExpenseEntries, creditTimelineEntries, currentMonthKey],
   )
 
   const creditCardsTotals = useMemo(
@@ -2939,18 +3119,30 @@ function App() {
       creditCardSummaries.reduce(
         (acc, card) => {
           acc.limit += card.limit
-          acc.spent += card.totalSpent
+          acc.committed += card.committedTotal
+          acc.upfront += card.upfrontTotal
+          acc.installment += card.installmentTotal
+          acc.monthly += card.monthlySpent
+          acc.future += card.futureInstallments
           acc.available += card.available
           return acc
         },
-        { limit: 0, spent: 0, available: 0 },
+        {
+          limit: 0,
+          committed: 0,
+          upfront: 0,
+          installment: 0,
+          monthly: 0,
+          future: 0,
+          available: 0,
+        },
       ),
     [creditCardSummaries],
   )
 
   const creditUsageRatio =
     creditCardsTotals.limit > 0
-      ? Math.min(creditCardsTotals.spent / creditCardsTotals.limit, 1.4)
+      ? Math.min(creditCardsTotals.committed / creditCardsTotals.limit, 1.4)
       : 0
 
   const creditOrphanEntries = useMemo(
@@ -3004,7 +3196,7 @@ function App() {
     activeHistoryCategory !== 'todas' && historySubcategoryOptions.length > 1
 
   const filteredHistoryEntries = useMemo(() => {
-    return orderedEntries.filter((entry) => {
+    return orderedTimelineEntries.filter((entry) => {
       const matchesType = historyFilters.type === 'todos' || entry.type === historyFilters.type
       const matchesCategory = activeHistoryCategory === 'todas' || entry.category === activeHistoryCategory
       const matchesSubcategory =
@@ -3015,7 +3207,7 @@ function App() {
           ? creditCardsById.get(entry.creditCardId ?? '')?.name ?? ''
           : ''
       const searchBase = normalizeSearchText(
-        `${entry.category} ${entry.subcategory ?? ''} ${getEntryCategoryLabel(entry)} ${entry.description} ${entry.date} ${entry.value} ${getTypeLabel(entry.type)} ${getPaymentMethodLabel(entry.paymentMethod)} ${linkedCardName}`,
+        `${entry.category} ${entry.subcategory ?? ''} ${getEntryCategoryLabel(entry)} ${entry.description} ${entry.date} ${entry.value} ${getTypeLabel(entry.type)} ${getPaymentMethodLabel(entry.paymentMethod)} ${getCreditChargeLabel(entry.creditChargeType)} ${entry.installmentLabel ?? ''} ${linkedCardName}`,
       )
       const matchesSearch =
         !normalizedGlobalSearchQuery ||
@@ -3024,7 +3216,7 @@ function App() {
       return matchesType && matchesCategory && matchesSubcategory && matchesSearch
     })
   }, [
-    orderedEntries,
+    orderedTimelineEntries,
     historyFilters.type,
     activeHistoryCategory,
     activeHistorySubcategory,
@@ -3047,6 +3239,21 @@ function App() {
   const activeFormSubcategory = formSubcategoryOptions.includes(formData.subcategory)
     ? formData.subcategory
     : ''
+  const activeFormCreditChargeType =
+    formData.type === 'despesa' && formData.paymentMethod === 'credito'
+      ? normalizeCreditChargeType(formData.creditChargeType, formData.paymentMethod) ?? 'avista'
+      : ''
+  const activeFormInstallmentsCount = normalizeInstallmentsCount(
+    formData.installmentsCount,
+    activeFormCreditChargeType,
+  )
+  const parsedFormValue = parseAmount(formData.value)
+  const formInstallmentPreview =
+    activeFormCreditChargeType === 'parcelado' &&
+    Number.isFinite(parsedFormValue) &&
+    parsedFormValue > 0
+      ? splitInstallmentValues(parsedFormValue, activeFormInstallmentsCount)[0]
+      : null
 
   useEffect(() => {
     setFormData((previous) => {
@@ -3059,14 +3266,26 @@ function App() {
         creditCardsById,
         creditCards,
       )
+      const creditChargeType =
+        normalizeCreditChargeType(previous.creditChargeType, previous.paymentMethod) ?? 'avista'
+      const installmentsCount = normalizeInstallmentsCount(
+        previous.installmentsCount,
+        creditChargeType,
+      )
 
-      if (selectedCreditCardId === previous.creditCardId) {
+      if (
+        selectedCreditCardId === previous.creditCardId &&
+        creditChargeType === previous.creditChargeType &&
+        installmentsCount === previous.installmentsCount
+      ) {
         return previous
       }
 
       return {
         ...previous,
         creditCardId: selectedCreditCardId,
+        creditChargeType,
+        installmentsCount,
       }
     })
   }, [creditCards, creditCardsById])
@@ -3147,43 +3366,6 @@ function App() {
     document.body.classList.add(activeTheme)
     document.body.dataset.themePreference = themePreference
   }, [activeTheme, themePreference])
-
-  useEffect(() => {
-    if (!isSecondaryMenuOpen || typeof document === 'undefined') {
-      return undefined
-    }
-
-    const handleOutsidePress = (event) => {
-      if (secondaryMenuRef.current?.contains(event.target)) {
-        return
-      }
-
-      setIsSecondaryMenuOpen(false)
-      setSecondaryMenuSection('main')
-    }
-
-    const handleEscape = (event) => {
-      if (event.key === 'Escape') {
-        setIsSecondaryMenuOpen(false)
-        setSecondaryMenuSection('main')
-      }
-    }
-
-    document.addEventListener('pointerdown', handleOutsidePress)
-    document.addEventListener('keydown', handleEscape)
-
-    return () => {
-      document.removeEventListener('pointerdown', handleOutsidePress)
-      document.removeEventListener('keydown', handleEscape)
-    }
-  }, [isSecondaryMenuOpen])
-
-  useEffect(() => {
-    if (isSecondaryMenuOpen) {
-      setIsSecondaryMenuOpen(false)
-      setSecondaryMenuSection('main')
-    }
-  }, [activeTab, isSecondaryMenuOpen])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -3288,24 +3470,6 @@ function App() {
     setToast({ type, message })
   }
 
-  const handleToggleSecondaryMenu = () => {
-    setIsSecondaryMenuOpen((previous) => {
-      const next = !previous
-      if (next) {
-        setSecondaryMenuSection('main')
-      }
-      return next
-    })
-  }
-
-  const handleOpenSettingsSection = () => {
-    setSecondaryMenuSection('settings')
-  }
-
-  const handleBackToMainMenu = () => {
-    setSecondaryMenuSection('main')
-  }
-
   const handleSelectTheme = (nextTheme) => {
     const normalizedTheme = normalizeThemePreference(nextTheme)
     setThemePreference(normalizedTheme)
@@ -3332,8 +3496,6 @@ function App() {
 
   const handleNavigateFromMenu = (tabId) => {
     setActiveTab(tabId)
-    setIsSecondaryMenuOpen(false)
-    setSecondaryMenuSection('main')
   }
 
   const resetLaunchForm = (type = 'despesa', cardsOverride = creditCards) => {
@@ -3366,6 +3528,20 @@ function App() {
                 creditCards,
               )
             : ''
+        const suggestedCreditChargeTypeForType =
+          value === 'despesa' && suggestedPaymentMethodForType === 'credito'
+            ? normalizeCreditChargeType(
+                suggestedEntryForType?.creditChargeType,
+                suggestedPaymentMethodForType,
+              ) ?? 'avista'
+            : ''
+        const suggestedInstallmentsForType =
+          value === 'despesa' && suggestedPaymentMethodForType === 'credito'
+            ? normalizeInstallmentsCount(
+                suggestedEntryForType?.installmentsCount,
+                suggestedCreditChargeTypeForType,
+              )
+            : 1
 
         return {
           ...previous,
@@ -3374,6 +3550,8 @@ function App() {
           subcategory: suggestedSubcategoryForType,
           paymentMethod: suggestedPaymentMethodForType,
           creditCardId: suggestedCreditCardIdForType,
+          creditChargeType: suggestedCreditChargeTypeForType,
+          installmentsCount: suggestedInstallmentsForType,
         }
       }
 
@@ -3395,6 +3573,10 @@ function App() {
 
       if (name === 'paymentMethod') {
         const nextPaymentMethod = normalizeEntryPaymentMethod(value, previous.type)
+        const nextCreditChargeType =
+          nextPaymentMethod === 'credito'
+            ? normalizeCreditChargeType(previous.creditChargeType, nextPaymentMethod) ?? 'avista'
+            : ''
         return {
           ...previous,
           paymentMethod: nextPaymentMethod,
@@ -3402,6 +3584,24 @@ function App() {
             nextPaymentMethod === 'credito'
               ? resolveSelectedCreditCardId(previous.creditCardId, creditCardsById, creditCards)
               : '',
+          creditChargeType: nextCreditChargeType,
+          installmentsCount: normalizeInstallmentsCount(
+            previous.installmentsCount,
+            nextCreditChargeType,
+          ),
+        }
+      }
+
+      if (name === 'creditChargeType') {
+        const nextCreditChargeType =
+          normalizeCreditChargeType(value, previous.paymentMethod) ?? 'avista'
+        return {
+          ...previous,
+          creditChargeType: nextCreditChargeType,
+          installmentsCount: normalizeInstallmentsCount(
+            previous.installmentsCount,
+            nextCreditChargeType,
+          ),
         }
       }
 
@@ -3424,6 +3624,8 @@ function App() {
         delete nextErrors.subcategory
         delete nextErrors.paymentMethod
         delete nextErrors.creditCardId
+        delete nextErrors.creditChargeType
+        delete nextErrors.installmentsCount
       }
 
       if (name === 'category') {
@@ -3432,6 +3634,12 @@ function App() {
 
       if (name === 'paymentMethod') {
         delete nextErrors.creditCardId
+        delete nextErrors.creditChargeType
+        delete nextErrors.installmentsCount
+      }
+
+      if (name === 'creditChargeType') {
+        delete nextErrors.installmentsCount
       }
 
       return nextErrors
@@ -3470,6 +3678,11 @@ function App() {
           suggestedLaunchEntry.paymentMethod,
           'despesa',
         )
+        const nextCreditChargeType =
+          nextPaymentMethod === 'credito'
+            ? normalizeCreditChargeType(suggestedLaunchEntry.creditChargeType, nextPaymentMethod) ??
+              'avista'
+            : ''
         nextData.paymentMethod = nextPaymentMethod
         nextData.creditCardId =
           nextPaymentMethod === 'credito'
@@ -3479,6 +3692,11 @@ function App() {
                 creditCards,
               )
             : ''
+        nextData.creditChargeType = nextCreditChargeType
+        nextData.installmentsCount = normalizeInstallmentsCount(
+          suggestedLaunchEntry.installmentsCount,
+          nextCreditChargeType,
+        )
       }
 
       if (
@@ -3636,6 +3854,8 @@ function App() {
 
   const handleStartEdit = (entry) => {
     const paymentMethod = normalizeEntryPaymentMethod(entry.paymentMethod, entry.type)
+    const creditChargeType = normalizeCreditChargeType(entry.creditChargeType, paymentMethod)
+    const installmentsCount = normalizeInstallmentsCount(entry.installmentsCount, creditChargeType)
     const selectedCreditCardId =
       entry.type === 'despesa' && paymentMethod === 'credito'
         ? resolveSelectedCreditCardId(entry.creditCardId, creditCardsById, creditCards)
@@ -3649,6 +3869,8 @@ function App() {
       subcategory: entry.subcategory ?? '',
       paymentMethod: paymentMethod ?? '',
       creditCardId: selectedCreditCardId,
+      creditChargeType: creditChargeType ?? '',
+      installmentsCount,
       date: entry.date,
       description: entry.description,
       recurrence: entry.recurrence,
@@ -3676,12 +3898,15 @@ function App() {
 
   const handleDuplicateEntry = (entry) => {
     const paymentMethod = normalizeEntryPaymentMethod(entry.paymentMethod, entry.type)
+    const creditChargeType = normalizeCreditChargeType(entry.creditChargeType, paymentMethod)
     const duplicatedEntry = {
       ...entry,
       id: createEntryId(),
       date: getInputDate(),
       paymentMethod,
       creditCardId: normalizeEntryCreditCardId(entry.creditCardId, paymentMethod),
+      creditChargeType,
+      installmentsCount: normalizeInstallmentsCount(entry.installmentsCount, creditChargeType),
       recurrence: 'none',
       recurrenceTemplateId: null,
     }
@@ -4373,10 +4598,10 @@ function App() {
             <article className="panel">
               <div className="panel-heading">
                 <h3>{t('screen.home.statement')}</h3>
-                <span>{orderedEntries.length} movimentações</span>
+                <span>{orderedTimelineEntries.length} movimentações</span>
               </div>
 
-              {orderedEntries.length === 0 ? (
+              {orderedTimelineEntries.length === 0 ? (
                 <div className="empty-state">
                   <Icon name="history" />
                   <p>Nenhuma movimentação financeira registrada.</p>
@@ -4384,8 +4609,8 @@ function App() {
                 </div>
               ) : (
                 <ul className="entry-list full">
-                  {orderedEntries.slice(0, 8).map((entry) => (
-                    <li key={entry.id} className="entry-item">
+                  {orderedTimelineEntries.slice(0, 8).map((entry) => (
+                    <li key={entry.timelineId ?? entry.id} className="entry-item">
                       <div className="entry-main">
                         <p className="entry-title">{getEntryCategoryLabel(entry)}</p>
                         <div className="entry-meta">
@@ -4395,6 +4620,12 @@ function App() {
                             <span className="tag-pill recurring">
                               <Icon name="repeat" size={12} />
                               Mensal
+                            </span>
+                          )}
+                          {entry.installmentLabel && (
+                            <span className="tag-pill installment">
+                              <Icon name="repeat" size={12} />
+                              {entry.installmentLabel}
                             </span>
                           )}
                           {entry.type === 'despesa' && entry.paymentMethod && (
@@ -4685,6 +4916,57 @@ function App() {
                           )}
                         </label>
                       ))}
+
+                    {formData.paymentMethod === 'credito' && (
+                      <>
+                        <label>
+                          <span className="field-label">
+                            <Icon name="reports" size={14} /> Cobrança no cartão
+                          </span>
+                          <select
+                            className={formErrors.creditChargeType ? 'input-error' : ''}
+                            name="creditChargeType"
+                            value={activeFormCreditChargeType}
+                            onChange={handleFormChange}
+                          >
+                            {CREDIT_CHARGE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                          {formErrors.creditChargeType && (
+                            <p className="form-error">{formErrors.creditChargeType}</p>
+                          )}
+                        </label>
+
+                        {activeFormCreditChargeType === 'parcelado' && (
+                          <label>
+                            <span className="field-label">
+                              <Icon name="repeat" size={14} /> Número de parcelas
+                            </span>
+                            <input
+                              className={formErrors.installmentsCount ? 'input-error' : ''}
+                              type="number"
+                              name="installmentsCount"
+                              min="2"
+                              max="36"
+                              step="1"
+                              value={activeFormInstallmentsCount}
+                              onChange={handleFormChange}
+                            />
+                            {Number.isFinite(formInstallmentPreview) && (
+                              <small className="field-help">
+                                Valor aproximado da parcela: {formatCurrency(formInstallmentPreview)}
+                              </small>
+                            )}
+                            {formErrors.installmentsCount && (
+                              <p className="form-error">{formErrors.installmentsCount}</p>
+                            )}
+                          </label>
+                        )}
+                      </>
+                    )}
                   </>
                 )}
 
@@ -4797,13 +5079,13 @@ function App() {
                   <strong>{formatCurrency(creditCardsTotals.limit)}</strong>
                 </div>
                 <div className="summary-item">
-                  <p>Total gasto</p>
-                  <strong className={creditCardsTotals.spent > creditCardsTotals.limit ? 'negative' : ''}>
-                    {formatCurrency(creditCardsTotals.spent)}
+                  <p>Valor comprometido</p>
+                  <strong className={creditCardsTotals.committed > creditCardsTotals.limit ? 'negative' : ''}>
+                    {formatCurrency(creditCardsTotals.committed)}
                   </strong>
                 </div>
                 <div className="summary-item">
-                  <p>Disponível total</p>
+                  <p>Limite disponível</p>
                   <strong className={creditCardsTotals.available >= 0 ? 'positive' : 'negative'}>
                     {formatCurrency(creditCardsTotals.available)}
                   </strong>
@@ -4917,21 +5199,27 @@ function App() {
                           <strong>{formatCurrency(card.limit)}</strong>
                         </div>
                         <div>
-                          <small>Valor gasto</small>
+                          <small>Valor comprometido</small>
                           <strong className={card.overLimit > 0 ? 'negative' : ''}>
-                            {formatCurrency(card.totalSpent)}
+                            {formatCurrency(card.committedTotal)}
                           </strong>
+                        </div>
+                        <div>
+                          <small>Gastos à vista</small>
+                          <strong>{formatCurrency(card.upfrontTotal)}</strong>
+                        </div>
+                        <div>
+                          <small>Compras parceladas</small>
+                          <strong>{formatCurrency(card.installmentTotal)}</strong>
+                        </div>
+                        <div>
+                          <small>Parcelas futuras</small>
+                          <strong>{formatCurrency(card.futureInstallments)}</strong>
                         </div>
                         <div>
                           <small>Disponível</small>
                           <strong className={card.available >= 0 ? 'positive' : 'negative'}>
                             {formatCurrency(card.available)}
-                          </strong>
-                        </div>
-                        <div>
-                          <small>Uso do limite</small>
-                          <strong className={card.usageRatio > 1 ? 'negative' : ''}>
-                            {(card.usageRatio * 100).toFixed(1)}%
                           </strong>
                         </div>
                       </div>
@@ -4947,15 +5235,40 @@ function App() {
                         <small className="section-note">Sem gastos nesse cartão até o momento.</small>
                       ) : (
                         <ul className="credit-expense-list">
-                          {card.expenses.slice(0, 8).map((entry) => (
-                            <li key={entry.id} className="credit-expense-item">
-                              <div>
-                                <p>{getEntryCategoryLabel(entry)}</p>
-                                <small>{getDisplayDate(entry.date, activeLanguageCode)}</small>
-                              </div>
-                              <strong className="negative">{formatCurrency(entry.value)}</strong>
-                            </li>
-                          ))}
+                          {card.expenses.slice(0, 8).map((entry) => {
+                            const chargeType = normalizeCreditChargeType(
+                              entry.creditChargeType,
+                              entry.paymentMethod,
+                            )
+                            const installmentSchedule = buildInstallmentSchedule(entry)
+
+                            return (
+                              <li key={entry.id} className="credit-expense-item">
+                                <div>
+                                  <p>{getEntryCategoryLabel(entry)}</p>
+                                  <small>
+                                    {getDisplayDate(entry.date, activeLanguageCode)} ·{' '}
+                                    {chargeType === 'parcelado'
+                                      ? `${entry.installmentsCount}x`
+                                      : 'À vista'}
+                                  </small>
+                                  {chargeType === 'parcelado' && installmentSchedule.length > 0 && (
+                                    <small>
+                                      Próxima referência:{' '}
+                                      {
+                                        installmentSchedule.find(
+                                          (installment) =>
+                                            getMonthKeyFromIsoDate(installment.date) >=
+                                            currentMonthKey,
+                                        )?.label ?? installmentSchedule[installmentSchedule.length - 1].label
+                                      }
+                                    </small>
+                                  )}
+                                </div>
+                                <strong className="negative">{formatCurrency(entry.value)}</strong>
+                              </li>
+                            )
+                          })}
                         </ul>
                       )}
                     </li>
@@ -4984,7 +5297,7 @@ function App() {
               <div className="panel-heading">
                 <h2>{t('screen.history.title')}</h2>
                 <span>
-                  {filteredHistoryEntries.length} de {orderedEntries.length}
+                  {filteredHistoryEntries.length} de {orderedTimelineEntries.length}
                 </span>
               </div>
 
@@ -5056,7 +5369,7 @@ function App() {
                 )}
               </div>
 
-              {orderedEntries.length === 0 ? (
+              {orderedTimelineEntries.length === 0 ? (
                 <div className="empty-state">
                   <Icon name="history" />
                   <p>Sem movimentações até o momento.</p>
@@ -5070,72 +5383,82 @@ function App() {
                 </div>
               ) : (
                 <ul className="entry-list full">
-                  {filteredHistoryEntries.map((entry) => (
-                    <li key={entry.id} className="entry-item">
-                      <div className="entry-main">
-                        <p className="entry-title">{getEntryCategoryLabel(entry)}</p>
-                        <div className="entry-meta">
-                          <small>{getDisplayDate(entry.date, activeLanguageCode)}</small>
-                          <span className={`type-pill ${entry.type}`}>{getTypeLabel(entry.type)}</span>
-                          {entry.recurrence === 'monthly' && (
-                            <span className="tag-pill recurring">
-                              <Icon name="repeat" size={12} />
-                              Mensal
-                            </span>
-                          )}
-                          {entry.type === 'despesa' && entry.paymentMethod && (
-                            <span className="tag-pill payment-method">
-                              <Icon
-                                name={entry.paymentMethod === 'credito' ? 'credit' : 'wallet'}
-                                size={12}
-                              />
-                              {getPaymentMethodLabel(entry.paymentMethod)}
-                            </span>
-                          )}
-                          {entry.type === 'despesa' && entry.paymentMethod === 'credito' && (
-                            <span className="tag-pill credit-card">
-                              <Icon name="credit" size={12} />
-                              {creditCardsById.get(entry.creditCardId ?? '')?.name ?? 'Sem cartão'}
-                            </span>
-                          )}
-                        </div>
-                        {entry.description && <small>{entry.description}</small>}
-                      </div>
+                  {filteredHistoryEntries.map((entry) => {
+                    const sourceEntry = entriesById.get(entry.sourceEntryId ?? entry.id) ?? entry
 
-                      <div className="entry-side">
-                        <strong className={entry.type === 'receita' ? 'positive' : 'negative'}>
-                          {entry.type === 'receita' ? '+' : '-'}
-                          {formatCurrency(entry.value)}
-                        </strong>
-                        <div className="entry-actions">
-                          <button
-                            className="mini-button"
-                            type="button"
-                            onClick={() => handleDuplicateEntry(entry)}
-                          >
-                            <Icon name="duplicate" size={13} />
-                            Duplicar
-                          </button>
-                          <button
-                            className="mini-button"
-                            type="button"
-                            onClick={() => handleStartEdit(entry)}
-                          >
-                            <Icon name="edit" size={13} />
-                            Editar
-                          </button>
-                          <button
-                            className="mini-button danger"
-                            type="button"
-                            onClick={() => handleRemoveEntry(entry.id)}
-                          >
-                            <Icon name="trash" size={13} />
-                            Remover
-                          </button>
+                    return (
+                      <li key={entry.timelineId ?? entry.id} className="entry-item">
+                        <div className="entry-main">
+                          <p className="entry-title">{getEntryCategoryLabel(entry)}</p>
+                          <div className="entry-meta">
+                            <small>{getDisplayDate(entry.date, activeLanguageCode)}</small>
+                            <span className={`type-pill ${entry.type}`}>{getTypeLabel(entry.type)}</span>
+                            {entry.recurrence === 'monthly' && (
+                              <span className="tag-pill recurring">
+                                <Icon name="repeat" size={12} />
+                                Mensal
+                              </span>
+                            )}
+                            {entry.installmentLabel && (
+                              <span className="tag-pill installment">
+                                <Icon name="repeat" size={12} />
+                                {entry.installmentLabel}
+                              </span>
+                            )}
+                            {entry.type === 'despesa' && entry.paymentMethod && (
+                              <span className="tag-pill payment-method">
+                                <Icon
+                                  name={entry.paymentMethod === 'credito' ? 'credit' : 'wallet'}
+                                  size={12}
+                                />
+                                {getPaymentMethodLabel(entry.paymentMethod)}
+                              </span>
+                            )}
+                            {entry.type === 'despesa' && entry.paymentMethod === 'credito' && (
+                              <span className="tag-pill credit-card">
+                                <Icon name="credit" size={12} />
+                                {creditCardsById.get(entry.creditCardId ?? '')?.name ?? 'Sem cartão'}
+                              </span>
+                            )}
+                          </div>
+                          {entry.description && <small>{entry.description}</small>}
                         </div>
-                      </div>
-                    </li>
-                  ))}
+
+                        <div className="entry-side">
+                          <strong className={entry.type === 'receita' ? 'positive' : 'negative'}>
+                            {entry.type === 'receita' ? '+' : '-'}
+                            {formatCurrency(entry.value)}
+                          </strong>
+                          <div className="entry-actions">
+                            <button
+                              className="mini-button"
+                              type="button"
+                              onClick={() => handleDuplicateEntry(sourceEntry)}
+                            >
+                              <Icon name="duplicate" size={13} />
+                              Duplicar
+                            </button>
+                            <button
+                              className="mini-button"
+                              type="button"
+                              onClick={() => handleStartEdit(sourceEntry)}
+                            >
+                              <Icon name="edit" size={13} />
+                              Editar
+                            </button>
+                            <button
+                              className="mini-button danger"
+                              type="button"
+                              onClick={() => handleRemoveEntry(sourceEntry.id)}
+                            >
+                              <Icon name="trash" size={13} />
+                              Remover
+                            </button>
+                          </div>
+                        </div>
+                      </li>
+                    )
+                  })}
                 </ul>
               )}
             </article>
@@ -5776,6 +6099,95 @@ function App() {
           </section>
         )}
 
+        {activeTab === 'menu' && (
+          <section className="screen">
+            <article className="panel">
+              <div className="panel-heading">
+                <h2>
+                  <Icon name="menu" size={16} className="heading-icon" />
+                  {t('menu.section')}
+                </h2>
+              </div>
+
+              <div className="menu-screen-links">
+                {SECONDARY_MENU_ITEMS.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="secondary-menu-link"
+                    onClick={() => handleNavigateFromMenu(item.id)}
+                  >
+                    <span className="secondary-menu-link-main">
+                      <Icon name={item.icon} size={15} />
+                      {t(`menu.${item.id}`)}
+                    </span>
+                    <Icon name="chevron-right" size={14} />
+                  </button>
+                ))}
+              </div>
+            </article>
+
+            <article className="panel">
+              <div className="panel-heading">
+                <h3>
+                  <Icon name="settings" size={16} className="heading-icon" />
+                  {t('menu.settings.title')}
+                </h3>
+              </div>
+
+              <div className="settings-controls">
+                <label className="settings-control">
+                  <span>
+                    <Icon name="reports" size={14} /> {t('settings.language')}
+                  </span>
+                  <select
+                    value={activeLanguageCode}
+                    onChange={(event) => handleSelectLanguage(event.target.value)}
+                  >
+                    {LANGUAGE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="settings-control">
+                  <span>
+                    <Icon name="wallet" size={14} /> {t('settings.currency')}
+                  </span>
+                  <select
+                    value={activeCurrencyCode}
+                    onChange={(event) => handleSelectCurrency(event.target.value)}
+                  >
+                    {CURRENCY_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="settings-control">
+                  <span>
+                    <Icon name="system" size={14} /> {t('settings.theme')}
+                  </span>
+                  <select
+                    value={themePreference}
+                    onChange={(event) => handleSelectTheme(event.target.value)}
+                  >
+                    {THEME_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {t(option.labelKey)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </article>
+          </section>
+        )}
+
         {activeTab === 'reports' && (
           <section className="screen">
             <article className="panel">
@@ -6006,26 +6418,14 @@ function App() {
 
       <nav className="bottom-nav" aria-label="Navegação principal">
         {PRIMARY_TAB_ITEMS.map((tab) => {
-          const isMenuTab = tab.isMenu
-          const isTabActive = isMenuTab ? isSecondaryMenuOpen : activeTab === tab.id
+          const isTabActive = activeTab === tab.id
 
-          const navButton = (
+          return (
             <button
               type="button"
               key={tab.id}
               className={`nav-item ${tab.isAction ? 'launch-action' : ''} ${isTabActive ? 'active' : ''}`}
-              onClick={() => {
-                if (isMenuTab) {
-                  handleToggleSecondaryMenu()
-                  return
-                }
-                setIsSecondaryMenuOpen(false)
-                setSecondaryMenuSection('main')
-                setActiveTab(tab.id)
-              }}
-              aria-haspopup={isMenuTab ? 'menu' : undefined}
-              aria-expanded={isMenuTab ? isSecondaryMenuOpen : undefined}
-              aria-label={isMenuTab ? t('menu.open') : undefined}
+              onClick={() => setActiveTab(tab.id)}
             >
               {tab.isAction ? (
                 <span className="launch-circle" aria-hidden="true">
@@ -6039,121 +6439,6 @@ function App() {
               )}
               <span className="nav-label">{t(`nav.${tab.id}`)}</span>
             </button>
-          )
-
-          if (!isMenuTab) {
-            return navButton
-          }
-
-          return (
-            <div className="nav-menu-slot" key={tab.id} ref={secondaryMenuRef}>
-              {navButton}
-
-              {isSecondaryMenuOpen && (
-                <div
-                  className="secondary-menu-panel bottom-menu-panel"
-                  role="menu"
-                  aria-label={t('menu.section')}
-                >
-                  {secondaryMenuSection === 'main' ? (
-                    <>
-                      <p className="menu-section-title">{t('menu.section')}</p>
-                      <div className="secondary-menu-links">
-                        {SECONDARY_MENU_ITEMS.map((item) => (
-                          <button
-                            key={item.id}
-                            type="button"
-                            className={`secondary-menu-link ${activeTab === item.id ? 'active' : ''}`}
-                            onClick={() => handleNavigateFromMenu(item.id)}
-                          >
-                            <span className="secondary-menu-link-main">
-                              <Icon name={item.icon} size={15} />
-                              {t(`menu.${item.id}`)}
-                            </span>
-                            <Icon name="chevron-right" size={14} />
-                          </button>
-                        ))}
-                        <button
-                          type="button"
-                          className={`secondary-menu-link ${secondaryMenuSection === 'settings' ? 'active' : ''}`}
-                          onClick={handleOpenSettingsSection}
-                        >
-                          <span className="secondary-menu-link-main">
-                            <Icon name="settings" size={15} />
-                            {t('menu.settings')}
-                          </span>
-                          <Icon name="chevron-right" size={14} />
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="settings-menu-head">
-                        <button
-                          className="mini-button"
-                          type="button"
-                          onClick={handleBackToMainMenu}
-                        >
-                          <Icon name="chevron-left" size={14} />
-                          {t('menu.settings.back')}
-                        </button>
-                        <strong>{t('menu.settings.title')}</strong>
-                      </div>
-
-                      <div className="settings-controls">
-                        <label className="settings-control">
-                          <span>
-                            <Icon name="reports" size={14} /> {t('settings.language')}
-                          </span>
-                          <select
-                            value={activeLanguageCode}
-                            onChange={(event) => handleSelectLanguage(event.target.value)}
-                          >
-                            {LANGUAGE_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <label className="settings-control">
-                          <span>
-                            <Icon name="wallet" size={14} /> {t('settings.currency')}
-                          </span>
-                          <select
-                            value={activeCurrencyCode}
-                            onChange={(event) => handleSelectCurrency(event.target.value)}
-                          >
-                            {CURRENCY_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <label className="settings-control">
-                          <span>
-                            <Icon name="system" size={14} /> {t('settings.theme')}
-                          </span>
-                          <select
-                            value={themePreference}
-                            onChange={(event) => handleSelectTheme(event.target.value)}
-                          >
-                            {THEME_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {t(option.labelKey)}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
           )
         })}
       </nav>
