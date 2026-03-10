@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "icons:generate": "pwsh -ExecutionPolicy Bypass -File ./scripts/generate-icons.ps1",
     "cap:sync": "npx cap sync",
     "cap:open:android": "npx cap open android"
   },
