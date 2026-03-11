@@ -284,12 +284,6 @@ function getInputDate(date = new Date()) {
   return `${date.getFullYear()}-${padNumber(date.getMonth() + 1)}-${padNumber(date.getDate())}`
 }
 
-function getDateDaysAgo(days) {
-  const date = new Date()
-  date.setDate(date.getDate() - days)
-  return getInputDate(date)
-}
-
 function getDisplayDate(isoDate, locale = 'pt-BR') {
   const [year, month, day] = isoDate.split('-').map(Number)
   return new Date(year, month - 1, day).toLocaleDateString(locale)
@@ -2225,49 +2219,6 @@ function getBootSnapshot(defaultEntries) {
   }
 }
 
-const initialEntries = [
-  {
-    id: '1',
-    type: 'receita',
-    value: 4200,
-    category: 'Salário',
-    date: getDateDaysAgo(7),
-    description: 'Pagamento mensal',
-    recurrence: 'monthly',
-    recurrenceTemplateId: 'rec-salario-base',
-  },
-  {
-    id: '2',
-    type: 'despesa',
-    value: 980,
-    category: 'Moradia',
-    date: getDateDaysAgo(5),
-    description: 'Aluguel',
-    recurrence: 'monthly',
-    recurrenceTemplateId: 'rec-moradia-base',
-  },
-  {
-    id: '3',
-    type: 'despesa',
-    value: 340,
-    category: 'Alimentação',
-    date: getDateDaysAgo(2),
-    description: 'Supermercado',
-    recurrence: 'none',
-    recurrenceTemplateId: null,
-  },
-  {
-    id: '4',
-    type: 'receita',
-    value: 450,
-    category: 'Freelance',
-    date: getDateDaysAgo(1),
-    description: 'Projeto rápido',
-    recurrence: 'none',
-    recurrenceTemplateId: null,
-  },
-]
-
 function Icon({ name, size = 18, className = '' }) {
   const baseProps = {
     width: size,
@@ -2575,7 +2526,7 @@ function Icon({ name, size = 18, className = '' }) {
 }
 
 function App() {
-  const [bootSnapshot] = useState(() => getBootSnapshot(initialEntries))
+  const [bootSnapshot] = useState(() => getBootSnapshot([]))
   const [activeTab, setActiveTab] = useState('home')
   const [entries, setEntries] = useState(() => bootSnapshot.entries)
   const [categoryGoals, setCategoryGoals] = useState(() => bootSnapshot.goals)
@@ -6447,3 +6398,4 @@ function App() {
 }
 
 export default App
+
